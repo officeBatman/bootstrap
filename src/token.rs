@@ -1,0 +1,64 @@
+mod macros;
+
+use crate::range::Located;
+use self::macros::define_plain_enum;
+
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum Token<'source> {
+    Ident(&'source str),
+    Keyword(Keyword),
+    Symbol(Symbol),
+    NewLine(NewLine),
+    String(&'source str),
+    Int(i32),            
+    InvalidChar(char),
+    UnteminatedString,
+}
+
+pub type LToken<'source> = Located<Token<'source>>;
+
+define_plain_enum! { pub enum Keyword {
+    Fn "fn",
+    Let "let",
+    If "if",
+    Else "else"
+} }
+
+define_plain_enum! { pub enum Symbol {
+    FatArrow "=>",
+    ThinArrow "->",
+    Equal "=",
+    Colon ":",
+    Comma ",",
+    OpenParen "(",
+    CloseParen ")",
+    OpenCurly "{",
+    CloseCurly "}",
+    Pipe "|"
+} }
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum NewLine {
+    NewLine { indent: usize },
+    EmptyLine,
+}
+
+impl<'a> From<NewLine> for Token<'a> {
+    fn from(value: NewLine) -> Self {
+        Self::NewLine(value)
+    }
+}
+
+impl<'a> From<Keyword> for Token<'a> {
+    fn from(value: Keyword) -> Self {
+        Self::Keyword(value)
+    }
+}
+
+impl<'a> From<Symbol> for Token<'a> {
+    fn from(value: Symbol) -> Self {
+        Self::Symbol(value)
+    }
+}
+
