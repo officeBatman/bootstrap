@@ -38,6 +38,7 @@ impl<T> Withable<T> for &mut Vec<T> {
     }
 }
 
+#[allow(unused_macros)]
 macro_rules! with_variable {
     ($variables:expr, $var:expr, $do:expr) => {{
         let old = $variables.begin($var);
@@ -47,8 +48,10 @@ macro_rules! with_variable {
     }};
 }
 
+#[allow(unused_imports)]
 pub(crate) use with_variable;
 
+#[allow(unused_macros)]
 macro_rules! with_variables {
     ($variables:expr, $variables_to_add:expr, $do:expr) => {{
         let old_values = $variables_to_add
@@ -65,6 +68,8 @@ macro_rules! with_variables {
         x
     }};
 }
+
+#[allow(unused_imports)]
 pub(crate) use with_variables;
 
 #[inline]
@@ -96,6 +101,7 @@ pub trait Pipe<T, U>: Into<T> {
 
 impl<T, U> Pipe<T, U> for T {}
 
+#[allow(dead_code)]
 pub fn collect_results<T, E>(
     results: impl IntoIterator<Item = Result<T, E>>,
 ) -> Result<Vec<T>, Vec<E>> {
@@ -123,6 +129,7 @@ pub fn collect_results<T, E>(
 
 // TODO: Rename to unzip
 #[inline]
+#[allow(dead_code)]
 pub fn destruct<T, U, E: Copy>(result: Result<(T, U), E>) -> (Result<T, E>, Result<U, E>) {
     match result {
         Ok((t, u)) => (Ok(t), Ok(u)),
@@ -130,6 +137,7 @@ pub fn destruct<T, U, E: Copy>(result: Result<(T, U), E>) -> (Result<T, E>, Resu
     }
 }
 
+#[allow(dead_code)]
 pub fn is_sorted<T: Ord>(data: &[T]) -> bool {
     data.windows(2).all(|w| w[0] <= w[1])
 }

@@ -290,7 +290,7 @@ mod tests {
         let source = indoc! {r#"
             x: prop = 5
 
-            y: type = x => "a"
+            y: type = x . "a"
         "#};
 
         assert_eq!(
@@ -311,10 +311,10 @@ mod tests {
                 Token::Ident("type").into_located(16..20),
                 Token::Symbol(Symbol::Equal).into_located(21..22),
                 Token::Ident("x").into_located(23..24),
-                Token::Symbol(Symbol::FatArrow).into_located(25..27),
-                Token::String("a").into_located(28..31),
+                Token::Symbol(Symbol::Dot).into_located(25..26),
+                Token::String("a").into_located(27..30),
 
-                Token::NewLine(NewLine::EmptyLine).into_located(31..32),
+                Token::NewLine(NewLine::EmptyLine).into_located(30..31),
             ]
         );
     }

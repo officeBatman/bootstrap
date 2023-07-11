@@ -1,4 +1,4 @@
-use std::ops::{Add, Deref, DerefMut};
+use std::ops::{Deref, DerefMut, BitOr};
 use std::cmp::{min, max};
 
 /// An integer representing a position in a file by byte index.
@@ -15,10 +15,10 @@ impl From<std::ops::Range<Pos>> for Range {
     }
 }
 
-impl Add<Range> for Range {
+impl BitOr<Range> for Range {
     type Output = Range;
 
-    fn add(self, rhs: Range) -> Self::Output {
+    fn bitor(self, rhs: Range) -> Self::Output {
         Range(min(self.0, rhs.0), max(self.1, rhs.1))
     }
 }

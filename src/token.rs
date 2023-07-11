@@ -20,22 +20,20 @@ pub type LToken<'source> = Located<Token<'source>>;
 
 define_plain_enum! { pub enum Keyword {
     Fn "fn",
-    Let "let",
     If "if",
-    Else "else"
+    Else "else",
+    Import "import"
 } }
 
 define_plain_enum! { pub enum Symbol {
-    FatArrow "=>",
-    ThinArrow "->",
     Equal "=",
+    DoubleColon "::",
     Colon ":",
-    Comma ",",
+    Dot ".",
     OpenParen "(",
     CloseParen ")",
     OpenCurly "{",
-    CloseCurly "}",
-    Pipe "|"
+    CloseCurly "}"
 } }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
