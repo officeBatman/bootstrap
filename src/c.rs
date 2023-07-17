@@ -33,14 +33,14 @@ pub enum Include {
 
 // TODO: Think about using PTypeExpr instead of just TypeExpr in the following datastructures.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopLevelDeclaration {
     Function(Function),
     #[allow(dead_code)]
     Struct(Name, Option<Vec<(PTypeExpr, Name)>>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Function {
     pub return_type: PTypeExpr,
     pub name: Name,
@@ -48,7 +48,7 @@ pub struct Function {
     pub body: Option<Block>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)]
 pub enum TypeExpr {
     Var(Name),
@@ -65,7 +65,7 @@ pub type PTypeExpr = Rc<TypeExpr>;
 
 pub type Block = Vec<Statement>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)]
 pub enum Statement {
     Expr(Expr),
@@ -85,7 +85,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)]
 pub enum Expr {
     Var(Name),
@@ -106,7 +106,7 @@ pub enum Expr {
     Dec(Box<Expr>),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UnaryOp {
     // Allow dead code - might be useful in the future.
     #[allow(dead_code)]
@@ -115,7 +115,7 @@ pub enum UnaryOp {
 
 // Allow dead code - might be useful in the future.
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BinaryOp {
     Add,
     Sub,

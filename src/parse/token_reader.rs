@@ -32,6 +32,10 @@ impl<'source> TokenReader<'source> {
         self.tokens.get(self.index).cloned()
     }
 
+    pub fn next(&self) -> Option<LToken<'source>> {
+        self.tokens.get(self.index + 1).cloned()
+    }
+
     pub fn pop(&mut self) -> Option<LToken<'source>> {
         let ret = self.current();
         self.index += 1;

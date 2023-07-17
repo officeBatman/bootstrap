@@ -12,11 +12,14 @@ pub struct Program {
 pub enum Statement {
     Import(QualifiedName),
     Expr(Expr),
+    VarDecl(Name, TypeExpr, Expr),
+    For(Name, Expr, Expr, Vec<Statement>),
+    If(Expr, Vec<Statement>, Option<Vec<Statement>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    Var(Name, Range),
+    Var(QualifiedName, Range),
     Literal(Literal, Range),
     Apply {
         func: Box<Expr>,
@@ -27,7 +30,12 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Str(Name),
-    Int(i32),
+    I32(i32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeExpr {
+    Var(Name, Range),
 }
 
 impl Expr {

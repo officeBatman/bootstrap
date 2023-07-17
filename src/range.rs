@@ -9,6 +9,21 @@ pub type Pos = usize;
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)] 
 pub struct Range(pub Pos, pub Pos);
 
+impl Range {
+    pub fn merge(self, other: Self) -> Self {
+        Range(min(self.0, other.0), max(self.1, other.1))
+    }
+
+    pub fn extend_start(self, start: Pos) -> Self {
+        Range(min(self.0, start), self.1)
+    }
+
+    #[allow(dead_code)]
+    pub fn extend_end(self, end: Pos) -> Self {
+        Range(self.0, max(self.1, end))
+    }
+}
+
 impl From<std::ops::Range<Pos>> for Range {
     fn from(range: std::ops::Range<Pos>) -> Self {
         Range(range.start, range.end)
@@ -19,7 +34,7 @@ impl BitOr<Range> for Range {
     type Output = Range;
 
     fn bitor(self, rhs: Range) -> Self::Output {
-        Range(min(self.0, rhs.0), max(self.1, rhs.1))
+        self.merge(rhs)
     }
 }
 

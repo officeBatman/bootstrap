@@ -15,7 +15,7 @@ use error::Report;
 use std::fs;
 use std::io;
 
-use crate::compile::ModuleMember;
+use crate::compile::ScopeMember;
 use crate::compile::Type;
 
 fn main() -> io::Result<()> {
@@ -40,6 +40,7 @@ fn main() -> io::Result<()> {
             // Run gcc
             let mut gcc = std::process::Command::new("gcc");
             gcc.arg("-o").arg(&out_file_path);
+            gcc.arg("-g");
             gcc.arg(&c_file_path);
             let code = gcc.status()?;
             if code.success() {
@@ -59,20 +60,56 @@ fn compile(source: &str) -> Result<c::Program, Vec<Report>> {
     {
         v.into_iter().map(|e| e.into()).collect()
     }
+
     // Parse
     let tokens = lex::lex(source);
     let ast = parse::parse(tokens).map_err(map_to_reports)?;
     // Compile
-    let initial_scope = vec![ModuleMember::Module {
-        name: "std".into(),
-        members: vec![ModuleMember::Module {
-            name: "io".into(),
-            members: vec![ModuleMember::Var(
-                "print".into(),
-                Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
-            )],
-        }],
-    }];
+    let initial_scope = vec![
+        ScopeMember::Module {
+            name: "std".into(),
+            members: vec![ScopeMember::Module {
+                name: "io".into(),
+                members: vec![
+                    ScopeMember::Var {
+                        name: "print".into(),
+                        qualified_name: vec!["std".into(), "io".into(), "print".into()],
+                        typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
+                    },
+                    ScopeMember::Var {
+                        name: "read".into(),
+                        qualified_name: vec!["std".into(), "io".into(), "read".into()],
+                        typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
+                    },
+                ],
+            }],
+        },
+        ScopeMember::TypeVar {
+            name: "i32".into(),
+            qualified_name: vec!["i32".into()],
+            equal_to: Type::I32.into(),
+        },
+        ScopeMember::TypeVar {
+            name: "str".into(),
+            qualified_name: vec!["str".into()],
+            equal_to: Type::Str.into(),
+        },
+        ScopeMember::TypeVar {
+            name: "bool".into(),
+            qualified_name: vec!["bool".into()],
+            equal_to: Type::Bool.into(),
+        },
+        ScopeMember::Var {
+            name: "true".into(),
+            qualified_name: vec!["true".into()],
+            typ: Type::Bool.into(),
+        },
+        ScopeMember::Var {
+            name: "false".into(),
+            qualified_name: vec!["false".into()],
+            typ: Type::Bool.into(),
+        },
+    ];
     let c_program = compile::compile(&ast, initial_scope).map_err(map_to_reports)?;
 
     Ok(c_program)

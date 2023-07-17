@@ -22,6 +22,9 @@ define_plain_enum! { pub enum Keyword {
     Fn "fn",
     If "if",
     Else "else",
+    For "for",
+    In "in",
+    Do "do",
     Import "import"
 } }
 
@@ -29,6 +32,7 @@ define_plain_enum! { pub enum Symbol {
     Equal "=",
     DoubleColon "::",
     Colon ":",
+    DotDot "..",
     Dot ".",
     OpenParen "(",
     CloseParen ")",

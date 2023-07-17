@@ -1,9 +1,10 @@
-use crate::range::Range;
+use crate::range::{Range, Pos};
 use std::fmt::{self, Display, Formatter};
 
 pub struct Report {
     pub message: String,
     pub range: Range,
+    pub hint: Option<String>,
 }
 
 impl Report {
@@ -24,7 +25,7 @@ fn line_number(source: &str, offset: usize) -> usize {
     source[..offset].chars().filter(|&c| c == '\n').count()
 }
 
-fn line_start(source: &str, offset: usize) -> usize {
+fn line_start(source: &str, offset: usize) -> Pos {
     source[..=offset].rfind('\n').map_or(0, |i| i + 1)
 }
 
@@ -46,17 +47,20 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
     let width = last_line_number.to_string().len();
 
     if first_line_number == last_line_number {
+        let first_line_start = line_start(source, range.0);
+        let range_with_line_bellow = range.extend_start(first_line_start - 2);
+        let lines = lines(source, range_with_line_bellow);
+
         return vec![
             format!(
-                "{:width$} |",
+                "{:width$} | {}",
                 "",
-                width = width
+                lines[0],
             ),
             format!(
                 "{:width$} | {}",
                 first_line_number + 1,
-                lines(source, range)[0],
-                width = width
+                lines[1],
             ),
             format!(
                 "{} | {}{}",
@@ -75,7 +79,6 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
                 "{:width$} >| {}",
                 first_line_number + i + 1,
                 line,
-                width = width
             )
         })
         .collect::<Vec<_>>()
@@ -83,11 +86,17 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
 
 impl Display for ReportDisplay<'_, '_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        
         writeln!(f, "error: {}", self.report.message)?;
         lines_format(self.source, self.report.range).iter().try_for_each(|line| {
             writeln!(f, "{}", line)?;
             Ok(())
         })?;
+
+        if let Some(hint) = &self.report.hint {
+            writeln!(f, "hint: {}", hint)?;
+        }
+
         Ok(())
     }
 }
