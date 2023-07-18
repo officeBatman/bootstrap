@@ -71,6 +71,7 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
         ];
     }
 
+    dbg!(width);
     lines(source, range)
         .into_iter()
         .enumerate()

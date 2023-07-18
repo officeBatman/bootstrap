@@ -137,8 +137,8 @@ fn statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
             let expected_type = eval_type_expr(type_expr, state);
             let (mut c_block, c_expr, type_) = compile_expr(expr, state)?;
 
-            if type_ != expected_type? {
-                todo!()
+            if type_ != expected_type.clone()? {
+                todo!("type mismatch {:?}, {:?}", type_, expected_type?);
             }
 
             let c_type = compile_type(&type_);
@@ -308,16 +308,18 @@ fn compile_type(t: &Type) -> Rc<c::TypeExpr> {
         }
         Type::Unit => "void".type_var().into(),
         Type::Bool => "bool".type_var().into(),
+        Type::Named(full_name) => compile_name(full_name).type_var().into(),
     }
 }
 
 fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
     match literal {
         Literal::Str(s) => Ok((
-            "make_str".var().call(vec![c::Expr::Str(s.clone())]),
+            "make_str".var().call(vec![s.clone().literal()]),
             Type::Str.into(),
         )),
         Literal::I32(i) => Ok((c::Expr::Int(*i), Type::I32.into())),
+        Literal::Char(ch) => Ok((ch.literal(), Type::I32.into())),
     }
 }
 
@@ -360,6 +362,7 @@ pub enum Type {
     Bool,
     Func(Vec<Rc<Type>>, Rc<Type>),
     Unit,
+    Named(QualifiedName),
 }
 
 impl State {

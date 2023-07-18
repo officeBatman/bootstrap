@@ -1,4 +1,4 @@
-use crate::token::{LToken, Token, Keyword, Symbol, NewLine};
+use crate::token::{LToken, Token, Keyword, Symbol, Quote, NewLine};
 use crate::range::{Range, IntoLocated};
 use crate::global::*;
 
@@ -88,25 +88,29 @@ impl State {
         }
     }
 
-    fn string<'source>(&mut self, s: &'source str) -> Option<Result<&'source str, ()>> {
-        if self.curr_char(s) != Some('"') {
-            return None;
-        }
+    fn string<'source>(&mut self, s: &'source str) -> Option<Result<(Quote, &'source str), ()>> {
+        let quote_char = self.curr_char(s);
+        let quote = match quote_char {
+            Some('"') => Quote::Double,
+            Some('\'') => Quote::Single,
+            _ => return None,
+        };
+
         // Skip over the qoute.
         self.line_pop(s);
 
         let start = self.index;
-        while !std::matches!(self.curr_char(s), Some('"') | None) {
+        while self.curr_char(s) != quote_char && self.curr_char(s).is_some() {
             self.pop(s);
         }
-        let is_terminated = self.curr_char(s) == Some('"');
+        let is_terminated = self.curr_char(s).is_some();
         let end = self.index;
 
         // Skip over the end qoute.
         self.line_pop(s);
 
         let string = &s[start..end];
-        Some(is_terminated.then_some(string).ok_or(()))
+        Some(is_terminated.then_some((quote, string)).ok_or(()))
     }
 
     fn number(&mut self, s: &str) -> Option<i32> {
@@ -217,7 +221,7 @@ impl State {
         // Parse strings.
         if let Some(string) = self.string(s) {
             return match string {
-                Ok(string) => Token::String(string),
+                Ok((quote, string)) => Token::String(quote, string),
                 Err(()) => Token::UnteminatedString,
             }
             .into_located(self.range())
@@ -312,7 +316,7 @@ mod tests {
                 Token::Symbol(Symbol::Equal).into_located(21..22),
                 Token::Ident("x").into_located(23..24),
                 Token::Symbol(Symbol::Dot).into_located(25..26),
-                Token::String("a").into_located(27..30),
+                Token::String(Quote::Double, "a").into_located(27..30),
 
                 Token::NewLine(NewLine::EmptyLine).into_located(30..31),
             ]

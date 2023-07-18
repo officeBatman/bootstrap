@@ -10,7 +10,7 @@ pub enum Token<'source> {
     Keyword(Keyword),
     Symbol(Symbol),
     NewLine(NewLine),
-    String(&'source str),
+    String(Quote, &'source str),
     Int(i32),            
     InvalidChar(char),
     UnteminatedString,
@@ -38,6 +38,11 @@ define_plain_enum! { pub enum Symbol {
     CloseParen ")",
     OpenCurly "{",
     CloseCurly "}"
+} }
+
+define_plain_enum! { pub enum Quote {
+    Single "'",
+    Double "\""
 } }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]

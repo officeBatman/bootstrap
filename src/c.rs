@@ -92,6 +92,7 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Expr>),
     Int(i32),
     Str(Name),
+    Char(char),
     // Allow dead code - might be useful in the future.
     #[allow(dead_code)]
     Unary(UnaryOp, Box<Expr>),
@@ -264,6 +265,7 @@ impl Expr {
             Expr::Var(name) => name.into(),
             Expr::Int(value) => value.to_string(),
             Expr::Str(string) => format!("\"{string}\""),
+            Expr::Char(ch) => format!("'{}'", ch),
             Expr::Call(function, arguments) => {
                 let mut code = String::new();
                 code.push_str(function.to_code().as_str());

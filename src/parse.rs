@@ -4,7 +4,7 @@ use crate::ast;
 use crate::error::Report;
 use crate::name::Name;
 use crate::range::Range;
-use crate::token::{Keyword, LToken, Symbol, Token};
+use crate::token::{Keyword, LToken, Symbol, Token, Quote};
 use token_reader::TokenReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,10 @@ pub enum Error {
     NoNameAfterFor(Range),
     IfConditionDidNotEnd(Range),
     NoDoAfterIf(Range),
+    BlockStatementNotIndentedCorrectly(Range),
+    BadCharLiteral(Range),
+    UnexpectedDoHere(Range),
+    StatementShouldHaveEnded(Range),
 }
 
 impl From<Error> for Report {
@@ -82,6 +86,26 @@ impl From<Error> for Report {
                     "If statements are of the form 'if <condition> do { <body> }'".to_string(),
                 ),
             },
+            Error::BlockStatementNotIndentedCorrectly(range) => Report {
+                message: "This statement is not indented correctly inside it's block".to_string(),
+                range,
+                hint: None,
+            },
+            Error::BadCharLiteral(range) => Report {
+                message: "This character literal is invalid".to_string(),
+                range,
+                hint: Some("Character literals must be a single character".to_string()),
+            },
+            Error::UnexpectedDoHere(range) => Report {
+                message: "Unexpected 'do' keyword here".to_string(),
+                range,
+                hint: Some("Perhaps you missed a keyword at the start of this line?".to_string()),
+            },
+            Error::StatementShouldHaveEnded(range) => Report {
+                message: "This statement should have ended before this".to_string(),
+                range,
+                hint: None,
+            },
         }
     }
 }
@@ -105,15 +129,25 @@ pub fn parse(tokens: Vec<LToken>) -> Result<ast::Program, Vec<Error>> {
 
 fn parse_program(state: &mut State) -> Result<ast::Program, ()> {
     let mut statements = vec![];
+
     loop {
-        skip_newlines(state);
+        if !skip_newlines(state) {
+            if state.pop_token_eq(Keyword::Do) {
+                state.errors.push(Error::UnexpectedDoHere(state.curr_range()));
+            } else {
+                state.errors.push(Error::StatementShouldHaveEnded(state.curr_range()));
+            }
+            skip_until_indent(0, state);
+            state.pop();
+        }
 
         if state.current().is_none() {
             break Ok(ast::Program { statements });
         }
 
         let Ok(statement) = parse_statement(state) else {
-            skip_until_top_level_newline(state);
+            skip_until_indent(0, state);
+            state.pop();
             continue;
         };
         statements.push(statement);
@@ -133,7 +167,7 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
         return Ok(statement);
     }
 
-    let expr = parse_expression(state);
+    let expr = parse_expr(state);
 
     if state.pop_token_eq(Symbol::Colon) {
         let type_ = parse_type_expr(state).and_then(|type_| {
@@ -157,20 +191,24 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
             return Err(());
         }
 
-        let rhs = parse_expression(state);
+        let rhs = parse_expr(state);
 
         let Ok(ast::Expr::Var(name, _)) = &expr else {
             state.errors.push(Error::CouldNotAssignTo(expr?));
             return Err(());
         };
 
-        return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), type_?, rhs?));
+        return Ok(ast::Statement::VarDecl(
+            name.first().unwrap().clone(),
+            type_?,
+            rhs?,
+        ));
     }
 
     expr.map(ast::Statement::Expr)
 }
 
-fn parse_expression(state: &mut State) -> Result<ast::Expr, ()> {
+fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
     let Some(first) = parse_atom(state)? else {
         state.errors.push(Error::ExpectedExpression(state.curr_range()));
         return Err(());
@@ -206,7 +244,7 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
 
     if state.pop_token_eq(Symbol::OpenParen) {
         // TODO: Skip until close paren
-        let expr = parse_expression(state)?;
+        let expr = parse_expr(state)?;
         if !state.pop_token_eq(Symbol::CloseParen) {
             todo!()
         }
@@ -253,13 +291,13 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
         todo!()
     }
 
-    let start_expr = parse_expression(state)?;
+    let start_expr = parse_expr(state)?;
 
     if !state.pop_token_eq(Symbol::DotDot) {
         todo!()
     }
 
-    let end_expr = parse_expression(state)?;
+    let end_expr = parse_expr(state)?;
 
     if !state.pop_token_eq(Keyword::Do) {
         todo!()
@@ -294,7 +332,7 @@ fn parse_if(state: &mut State) -> Result<Option<ast::Statement>, ()> {
         return Ok(None);
     }
 
-    let condition = parse_expression(state);
+    let condition = parse_expr(state);
     let range_after_expr = state.curr_range();
 
     let skipped = skip_until_pred(state, |token| {
@@ -336,19 +374,35 @@ fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
     }
     let inner_indent = state.indent();
 
-    let mut statements = vec![];
-    while !state.pop_indent_same(outer_indent) {
-        let stmt = parse_statement(state);
-        state.pop_indent_same(inner_indent);
-        statements.push(stmt);
+    let mut statements = Ok(vec![]);
+    loop {
+        let Ok(statement) = parse_statement(state) else {
+            skip_until_indent(inner_indent, state);
+            state.pop();
+            continue;
+        };
+
+        if let Ok(statements) = &mut statements {
+            statements.push(statement);
+        }
+
+        if state.pop_indent_same(outer_indent) {
+            break;
+        }
+
+        if !state.pop_indent_same(inner_indent) {
+            state.errors.push(Error::BlockStatementNotIndentedCorrectly(
+                state.curr_range(),
+            ));
+
+        }
     }
 
     if !state.pop_token_eq(Symbol::CloseCurly) {
         todo!()
     }
 
-    let statements = statements.into_iter().collect::<Result<_, _>>()?;
-    Ok(Some(statements))
+    statements.map(Some)
 }
 
 fn parse_qualified_name(state: &mut State) -> Result<Option<ast::QualifiedName>, ()> {
@@ -369,8 +423,17 @@ fn parse_qualified_name(state: &mut State) -> Result<Option<ast::QualifiedName>,
 }
 
 fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
-    if let Some(string) = state.pop_token_string() {
-        return Ok(Some(ast::Literal::Str(Name::from_str(string))));
+    if let Some((quote, string)) = state.pop_token_string() {
+        match quote {
+            Quote::Double => return Ok(Some(ast::Literal::Str(Name::from_str(string)))),
+            Quote::Single => {
+                if string.chars().count() != 1 {
+                    state.errors.push(Error::BadCharLiteral(state.prev_range()));
+                    return Err(());
+                }
+                return Ok(Some(ast::Literal::Char(string.chars().next().unwrap())));
+            },
+        }
     }
 
     if let Some(int) = state.pop_token_int() {
@@ -380,14 +443,18 @@ fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
     Ok(None)
 }
 
-fn skip_newlines(state: &mut State) {
-    while state.pop_token_newline().is_some() {}
+fn skip_newlines(state: &mut State) -> bool {
+    let mut ret = false;
+    while state.pop_token_newline().is_some() {
+        ret = true;
+    }
+    ret
 }
 
-fn skip_until_top_level_newline(state: &mut State) {
+fn skip_until_indent(indent: usize, state: &mut State) {
     use crate::token::NewLine as L;
-    while let Some(curr) = state.pop_token() {
-        if curr == Token::NewLine(L::NewLine { indent: 0 }) {
+    while let Some(curr) = state.curr_token() {
+        if curr == Token::NewLine(L::NewLine { indent }) {
             break;
         }
 
@@ -403,6 +470,8 @@ fn skip_until_top_level_newline(state: &mut State) {
               continue;
           } */
         // TODO: Return this.
+
+        state.pop_token();
     }
 }
 

@@ -109,6 +109,11 @@ fn compile(source: &str) -> Result<c::Program, Vec<Report>> {
             qualified_name: vec!["false".into()],
             typ: Type::Bool.into(),
         },
+        ScopeMember::TypeVar {
+            name: "char".into(),
+            qualified_name: vec!["char".into()],
+            equal_to: Type::Named(vec!["char".into()]).into(),
+        },
     ];
     let c_program = compile::compile(&ast, initial_scope).map_err(map_to_reports)?;
 

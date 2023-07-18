@@ -134,3 +134,11 @@ pub trait CombInt: Into<i32> {
 }
 
 impl CombInt for i32 {}
+
+pub trait CombChar: Into<char> {
+    fn literal(self) -> Expr {
+        Expr::Char(self.into())
+    }
+}
+
+impl CombChar for char {}

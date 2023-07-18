@@ -30,6 +30,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Str(Name),
+    Char(char),
     I32(i32),
 }
 

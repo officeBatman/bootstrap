@@ -1,4 +1,4 @@
-use crate::token::{LToken, NewLine, Symbol, Token};
+use crate::token::{LToken, NewLine, Symbol, Quote, Token};
 use crate::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,10 +82,10 @@ impl<'source> TokenReader<'source> {
         }
     }
 
-    pub fn pop_token_string(&mut self) -> Option<&'source str> {
-        if let Some(Token::String(string)) = self.curr_token() {
+    pub fn pop_token_string(&mut self) -> Option<(Quote, &'source str)> {
+        if let Some(Token::String(quote, string)) = self.curr_token() {
             self.pop_token();
-            Some(string)
+            Some((quote, string))
         } else {
             None
         }
