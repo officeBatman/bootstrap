@@ -4,7 +4,7 @@ use crate::ast;
 use crate::error::Report;
 use crate::name::Name;
 use crate::range::Range;
-use crate::token::{Keyword, LToken, Symbol, Token, Quote};
+use crate::token::{Keyword, LToken, Quote, Symbol, Token};
 use token_reader::TokenReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,9 +133,13 @@ fn parse_program(state: &mut State) -> Result<ast::Program, ()> {
     loop {
         if !skip_newlines(state) {
             if state.pop_token_eq(Keyword::Do) {
-                state.errors.push(Error::UnexpectedDoHere(state.curr_range()));
+                state
+                    .errors
+                    .push(Error::UnexpectedDoHere(state.curr_range()));
             } else {
-                state.errors.push(Error::StatementShouldHaveEnded(state.curr_range()));
+                state
+                    .errors
+                    .push(Error::StatementShouldHaveEnded(state.curr_range()));
             }
             skip_until_indent(0, state);
             state.pop();
@@ -394,7 +398,6 @@ fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
             state.errors.push(Error::BlockStatementNotIndentedCorrectly(
                 state.curr_range(),
             ));
-
         }
     }
 
@@ -432,7 +435,7 @@ fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
                     return Err(());
                 }
                 return Ok(Some(ast::Literal::Char(string.chars().next().unwrap())));
-            },
+            }
         }
     }
 
@@ -465,10 +468,10 @@ fn skip_until_indent(indent: usize, state: &mut State) {
         } else if curr == Symbol::OpenParen.into() {
             skip_until(state, Symbol::CloseParen);
             continue;
-        } /* else if curr == Some(Symbol::OpenBracket.into()) {
-              skip_until(state, Symbol::CloseBracket);
-              continue;
-          } */
+        } else if curr == Symbol::OpenSquare.into() {
+            skip_until(state, Symbol::CloseSquare);
+            continue;
+        }
         // TODO: Return this.
 
         state.pop_token();

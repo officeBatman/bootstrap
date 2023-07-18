@@ -36,6 +36,8 @@ define_plain_enum! { pub enum Symbol {
     Dot ".",
     OpenParen "(",
     CloseParen ")",
+    OpenSquare "[",
+    CloseSquare "]",
     OpenCurly "{",
     CloseCurly "}"
 } }
