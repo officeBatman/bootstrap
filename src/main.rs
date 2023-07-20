@@ -65,24 +65,86 @@ fn compile(source: &str) -> Result<c::Program, Vec<Report>> {
     let tokens = lex::lex(source);
     let ast = parse::parse(tokens).map_err(map_to_reports)?;
     // Compile
-    let initial_scope = vec![
+    let c_program = compile::compile(&ast, initial_scope()).map_err(map_to_reports)?;
+
+    Ok(c_program)
+}
+
+fn initial_scope() -> Vec<ScopeMember> {
+    vec![
         ScopeMember::Module {
             name: "std".into(),
-            members: vec![ScopeMember::Module {
-                name: "io".into(),
-                members: vec![
-                    ScopeMember::Var {
-                        name: "print".into(),
-                        qualified_name: vec!["std".into(), "io".into(), "print".into()],
-                        typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
-                    },
-                    ScopeMember::Var {
-                        name: "read".into(),
-                        qualified_name: vec!["std".into(), "io".into(), "read".into()],
-                        typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
-                    },
-                ],
-            }],
+            members: vec![
+                ScopeMember::Module {
+                    name: "io".into(),
+                    members: vec![
+                        ScopeMember::Var {
+                            name: "print".into(),
+                            qualified_name: vec!["std".into(), "io".into(), "print".into()],
+                            typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "print_i32".into(),
+                            qualified_name: vec!["std".into(), "io".into(), "print_i32".into()],
+                            typ: Type::Func(vec![Type::I32.into()], Type::Str.into()).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "print_bool".into(),
+                            qualified_name: vec!["std".into(), "io".into(), "print_bool".into()],
+                            typ: Type::Func(vec![Type::Bool.into()], Type::Str.into()).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "read".into(),
+                            qualified_name: vec!["std".into(), "io".into(), "read".into()],
+                            typ: Type::Func(vec![Type::Str.into()], Type::Str.into()).into(),
+                        },
+                    ],
+                },
+                ScopeMember::Module {
+                    name: "str".into(),
+                    members: vec![
+                        ScopeMember::Var {
+                            name: "len".into(),
+                            qualified_name: vec!["std".into(), "str".into(), "len".into()],
+                            typ: Type::Func(vec![Type::Str.into()], Type::I32.into()).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "split".into(),
+                            qualified_name: vec!["std".into(), "str".into(), "split".into()],
+                            typ: Type::Func(
+                                vec![Type::Str.into(), Type::Str.into()],
+                                Type::Array(Type::Str.into()).into(),
+                            ).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "eq".into(),
+                            qualified_name: vec!["std".into(), "str".into(), "eq".into()],
+                            typ: Type::Func(vec![Type::Str.into(), Type::Str.into()], Type::Bool.into()).into(),
+                        },
+                    ],
+                },
+                ScopeMember::Module {
+                    name: "arr".into(),
+                    members: vec![
+                        ScopeMember::Var {
+                            name: "get".into(),
+                            qualified_name: vec!["std".into(), "arr".into(), "get".into()],
+                            typ: Type::Func(
+                                vec![Type::Array(Type::Str.into()).into(), Type::I32.into()],
+                                Type::Str.into(),
+                            ).into(),
+                        },
+                        ScopeMember::Var {
+                            name: "len".into(),
+                            qualified_name: vec!["std".into(), "arr".into(), "len".into()],
+                            typ: Type::Func(
+                                vec![Type::Array(Type::Str.into()).into()],
+                                Type::I32.into(),
+                            ).into(),
+                        },
+                    ],
+                },
+            ],
         },
         ScopeMember::TypeVar {
             name: "i32".into(),
@@ -114,8 +176,5 @@ fn compile(source: &str) -> Result<c::Program, Vec<Report>> {
             qualified_name: vec!["char".into()],
             equal_to: Type::Named(vec!["char".into()]).into(),
         },
-    ];
-    let c_program = compile::compile(&ast, initial_scope).map_err(map_to_reports)?;
-
-    Ok(c_program)
+    ]
 }

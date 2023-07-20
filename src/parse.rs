@@ -266,10 +266,18 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
 
 fn parse_type_expr(state: &mut State) -> Result<Option<ast::TypeExpr>, ()> {
     if let Some(ident) = state.pop_token_ident() {
-        return Ok(Some(ast::TypeExpr::Var(
-            Name::from_str(ident),
-            state.prev_range(),
-        )));
+        let mut ret = ast::TypeExpr::Var(Name::from_str(ident), state.prev_range());
+
+        while state.pop_token_eq(Symbol::OpenSquare) {
+            if !state.pop_token_eq(Symbol::CloseSquare) {
+                todo!()
+            }
+
+            let range = ret.range() | state.prev_range();
+            ret = ast::TypeExpr::Array(Box::new(ret), range);
+        }
+
+        return Ok(Some(ret));
     }
 
     Ok(None)

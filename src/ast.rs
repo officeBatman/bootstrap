@@ -1,5 +1,5 @@
-use crate::range::Range;
 use crate::name::Name;
+use crate::range::Range;
 
 pub type QualifiedName = Vec<Name>;
 
@@ -21,10 +21,7 @@ pub enum Statement {
 pub enum Expr {
     Var(QualifiedName, Range),
     Literal(Literal, Range),
-    Apply {
-        func: Box<Expr>,
-        args: Vec<Expr>,
-    },
+    Apply { func: Box<Expr>, args: Vec<Expr> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +34,7 @@ pub enum Literal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeExpr {
     Var(Name, Range),
+    Array(Box<TypeExpr>, Range),
 }
 
 impl Expr {
@@ -54,3 +52,12 @@ impl Expr {
         }
     }
 }
+
+impl TypeExpr {
+    pub fn range(&self) -> Range {
+        match self {
+            TypeExpr::Var(_, range) | TypeExpr::Array(_, range) => *range,
+        }
+    }
+}
+

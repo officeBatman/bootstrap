@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{Expr, Literal, Program, QualifiedName, Statement, TypeExpr};
@@ -141,7 +142,7 @@ fn statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
                 todo!("type mismatch {:?}, {:?}", type_, expected_type?);
             }
 
-            let c_type = compile_type(&type_);
+            let c_type = compile_type(&type_, state);
 
             let qualified_name = vec![name.clone()];
             let c_name = compile_name(&qualified_name);
@@ -167,7 +168,7 @@ fn statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
             let c_body_block = body_block?;
 
             // Compile the types of the bounds.
-            let c_start_type = compile_type(&start_type);
+            let c_start_type = compile_type(&start_type, state);
             // let c_end_type = compile_type(&end_type);
 
             let c_iter_var_name = compile_name(&vec![iteration_var_name.clone()]);
@@ -294,21 +295,33 @@ fn eval_type_expr(expr: &TypeExpr, state: &mut State) -> Result<Rc<Type>, ()> {
 
             Ok(t.clone())
         }
+        TypeExpr::Array(inner, _) => {
+            let inner = eval_type_expr(inner, state)?;
+            Ok(Type::Array(inner).into())
+        }
     }
 }
 
-fn compile_type(t: &Type) -> Rc<c::TypeExpr> {
+fn compile_type(t: &Type, state: &mut State) -> Rc<c::TypeExpr> {
     match t {
         Type::I32 => "int32_t".type_var().into(),
         Type::Str => "str".type_var().into(),
         Type::Func(args, ret) => {
-            let args: Vec<_> = args.iter().map(|a| compile_type(a)).collect();
-            let ret = compile_type(ret);
+            let args: Vec<_> = args.iter().map(|a| compile_type(a, state)).collect();
+            let ret = compile_type(ret, state);
             ret.function_ptr(args).into()
         }
         Type::Unit => "void".type_var().into(),
         Type::Bool => "bool".type_var().into(),
         Type::Named(full_name) => compile_name(full_name).type_var().into(),
+        Type::Array(inner) => {
+            let inner = compile_type(inner, state);
+            if !state.array_types.contains_key(&inner) {
+                let type_name = format!("array_{}", state.array_types.len());
+                state.array_types.insert(inner.clone(), type_name.into());
+            }
+            state.array_types.get(&inner).unwrap().clone().type_var().into()
+        }
     }
 }
 
@@ -335,6 +348,7 @@ fn total_range(ranges: impl IntoIterator<Item = Range>, default: Range) -> Range
 struct State {
     scope: Vec<ScopeMember>,
     errors: Vec<Error>,
+    array_types: HashMap<Rc<c::TypeExpr>, Name>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,7 +369,7 @@ pub enum ScopeMember {
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
     Str,
     I32,
@@ -363,6 +377,7 @@ pub enum Type {
     Func(Vec<Rc<Type>>, Rc<Type>),
     Unit,
     Named(QualifiedName),
+    Array(Rc<Type>),
 }
 
 impl State {

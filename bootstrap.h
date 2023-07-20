@@ -14,25 +14,63 @@ typedef struct str {
     str_head* head_ptr;
 } str;
 
-static inline str make_str(const char* c_str) {
-    size_t len = strlen(c_str);
+#define DEFINE_ARRAY_TYPE(TYPE, NAME) \
+    typedef struct NAME { \
+        size_t length; \
+        TYPE* data; \
+    } NAME;
+
+DEFINE_ARRAY_TYPE(str, array_0)
+
+static inline char* str_c_string(str string) {
+    return (char*)(string.head_ptr + 1);
+}
+
+static inline str make_str_len(size_t len) {
     str_head* head_ptr = (str_head*)malloc(sizeof(str_head) + len + 1);
     head_ptr->rc = 1;
-    memcpy(head_ptr + 1, c_str, len + 1);
     str out = {len, head_ptr};
+    str_c_string(out)[len] = '\0';
     return out;
 }
 
-static inline const char* str_c_string(str string) {
-    return (const char*)(string.head_ptr + 1);
+static inline str make_str(const char* c_str) {
+    size_t len = strlen(c_str);
+    str out = make_str_len(len);
+    memcpy(str_c_string(out), c_str, len);
+    return out;
+}
+
+static inline char bootstrap_std_str_get(str string, int32_t index) {
+    return str_c_string(string)[index];
+}
+
+static inline int32_t bootstrap_std_str_len(str string) {
+    return string.length;
+}
+
+static inline str bootstrap_std_str_substr(str string, int32_t start, int32_t end) {
+    str out = make_str_len(end - start);
+    memcpy(str_c_string(out), str_c_string(string) + start, end - start);
+    str_c_string(out)[end - start] = '\0';
+    return out;
+}
+
+static inline bool bootstrap_std_str_eq(str a, str b) {
+    return a.length == b.length && memcmp(str_c_string(a), str_c_string(b), a.length) == 0;
 }
 
 static inline void bootstrap_std_io_print(str string) {
     printf("%s\n", str_c_string(string));
 }
 
-static bool bootstrap_true = true;
-static bool bootstrap_false = false;
+static inline void bootstrap_std_io_print_i32(int32_t i32) {
+    printf("%d\n", i32);
+}
+
+static inline void bootstrap_std_io_print_bool(bool b) {
+    printf("%s\n", b ? "true" : "false");
+}
 
 static inline str bootstrap_std_io_read(str filename) {
     FILE* file = fopen(str_c_string(filename), "rb");
@@ -55,3 +93,49 @@ static inline str bootstrap_std_io_read(str filename) {
     str out = {len, head_ptr};
     return out;
 }
+
+static inline int32_t bootstrap_std_arr_len(array_0 arr) {
+    return arr.length;
+}
+
+static inline str bootstrap_std_arr_get(array_0 arr, int32_t i) {
+    return arr.data[i];
+}
+
+static inline array_0 bootstrap_std_arr_append(array_0 arr, str item) {
+    int32_t len = arr.length;
+    str* data = (str*)malloc(sizeof(str) * (len + 1));
+    memcpy(data, arr.data, sizeof(str) * len);
+    data[len] = item;
+    array_0 out = {(size_t)len + 1, data};
+    return out;
+}
+
+static inline array_0 bootstrap_std_str_split(str string, str sep) {
+    array_0 ret = {0, NULL};
+    int32_t len = string.length;
+    int32_t sep_len = sep.length;
+
+    size_t start = 0;
+    size_t end = 0;
+    while (start < len && end < len) {
+        if (memcmp(str_c_string(string) + end, str_c_string(sep), sep_len) == 0) {
+            str item = bootstrap_std_str_substr(string, start, end);
+            array_0 appendend = bootstrap_std_arr_append(ret, item);
+            free(ret.data);
+            ret = appendend;
+            start = end + sep_len;
+            end = start;
+        } else {
+            end++;
+        }
+    }
+    if (start < len) {
+        str item = bootstrap_std_str_substr(string, start, len);
+        array_0 appendend = bootstrap_std_arr_append(ret, item);
+        free(ret.data);
+        ret = appendend;
+    }
+    return ret;
+}
+

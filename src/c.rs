@@ -48,7 +48,7 @@ pub struct Function {
     pub body: Option<Block>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub enum TypeExpr {
     Var(Name),
@@ -59,6 +59,7 @@ pub enum TypeExpr {
     #[allow(dead_code)]
     Struct(Vec<(PTypeExpr, Name)>),
     FunctionPtr(PTypeExpr, Vec<PTypeExpr>),
+    Array(PTypeExpr),
 }
 
 pub type PTypeExpr = Rc<TypeExpr>;
@@ -363,6 +364,7 @@ impl TypeExpr {
             Struct(fields) => struct_code(None, fields),
             FunctionPtr(_, _) => self.to_code_with_name(""),
             Ptr(typ) => typ.to_code() + "*",
+            Array(typ) => typ.to_code() + "[]",
         }
     }
 
@@ -387,6 +389,7 @@ impl TypeExpr {
                 buf
             }
             Ptr(typ) => format!("{} *{name}", &typ.to_code()),
+            Array(typ) => format!("{} {name}[]", &typ.to_code()),
             _ => format!("{} {}", self.to_code(), name),
         }
     }
