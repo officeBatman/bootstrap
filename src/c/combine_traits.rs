@@ -30,6 +30,22 @@ pub trait CombExpr1: Into<Box<Expr>> {
         Expr::Binary(BinaryOp::Eq, self.into(), other.into())
     }
 
+    fn mul(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Mul, self.into(), other.into())
+    }
+
+    fn div(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Div, self.into(), other.into())
+    }
+
+    fn add(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Add, self.into(), other.into())
+    }
+
+    fn sub(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Sub, self.into(), other.into())
+    }
+
     /// Makes a call expression to this function.
     fn call(self, parameters: impl Into<Vec<Expr>>) -> Expr {
         Expr::Call(self.into(), parameters.into())
@@ -38,6 +54,11 @@ pub trait CombExpr1: Into<Box<Expr>> {
     /// Makes an expression that casts this to another type.
     fn cast(self, type_expr: impl Into<PTypeExpr>) -> Expr {
         Expr::Cast(type_expr.into(), self.into())
+    }
+
+    /// Makes an expression that indexes this with another expression.
+    fn index(self, index: impl Into<Box<Expr>>) -> Expr {
+        Expr::Index(self.into(), index.into())
     }
 }
 

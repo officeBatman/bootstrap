@@ -91,6 +91,7 @@ pub enum Statement {
 pub enum Expr {
     Var(Name),
     Call(Box<Expr>, Vec<Expr>),
+    Index(Box<Expr>, Box<Expr>),
     Int(i32),
     Str(Name),
     Char(char),
@@ -139,11 +140,18 @@ fn seperate_with_newlines(i: impl IntoIterator<Item = I>) -> impl Iterator<Item 
 
 impl MultilineCode for Program {
     fn to_code_i(&self) -> I {
-        let (start, end): (Vec<_>, Vec<_>) = self
-            .declarations
-            .iter()
-            .map(|decl| decl.to_code_i())
-            .unzip();
+        let mut structs = (vec![], vec![]);
+        let mut functions = (vec![], vec![]);
+
+        for decl in &self.declarations {
+            let (start_vec, end_vec) = match decl {
+                TopLevelDeclaration::Struct(..) => &mut structs,
+                _ => &mut functions,
+            };
+            let (start, end) = decl.to_code_i();
+            start_vec.push(start);
+            end_vec.push(end);
+        }
 
         I::many([
             I::lines(self.includes.iter().map(|include| match include {
@@ -151,8 +159,10 @@ impl MultilineCode for Program {
                 Include::Quote(path) => format!("#include \"{path}\""),
             })),
             I::line_str(""),
-            I::many(seperate_with_newlines(start)),
-            I::many(seperate_with_newlines(end.into_iter().flatten())),
+            I::many(seperate_with_newlines(structs.0)),
+            I::many(seperate_with_newlines(functions.0)),
+            I::many(seperate_with_newlines(structs.1.into_iter().flatten())),
+            I::many(seperate_with_newlines(functions.1.into_iter().flatten())),
         ])
     }
 }
@@ -330,6 +340,9 @@ impl Expr {
             }
             Expr::Inc(e) => e.to_code() + "++",
             Expr::Dec(e) => e.to_code() + "--",
+            Expr::Index(e, index) => {
+                format!("{}[{}]", e.to_code(), index.to_code())
+            }
         }
     }
 }

@@ -27,14 +27,15 @@ where
 }
 
 impl<T> Withable<T> for &mut Vec<T> {
-    type Hid = ();
+    type Hid = usize;
 
-    fn begin(self, x: T) {
+    fn begin(self, x: T) -> usize {
         self.push(x);
+        self.len() - 1
     }
 
-    fn end(self, _: ()) {
-        self.pop();
+    fn end(self, len: usize) {
+        self.truncate(len);
     }
 }
 

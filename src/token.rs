@@ -25,7 +25,9 @@ define_plain_enum! { pub enum Keyword {
     For "for",
     In "in",
     Do "do",
-    Import "import"
+    Import "import",
+    Type "type",
+    New "new"
 } }
 
 define_plain_enum! { pub enum Symbol {
@@ -34,6 +36,8 @@ define_plain_enum! { pub enum Symbol {
     Colon ":",
     DotDot "..",
     Dot ".",
+    Comma ",",
+    Unit "()",
     OpenParen "(",
     CloseParen ")",
     OpenSquare "[",

@@ -22,6 +22,10 @@ pub enum Error {
     BadCharLiteral(Range),
     UnexpectedDoHere(Range),
     StatementShouldHaveEnded(Range),
+    ExpectedNameAfterType(Range),
+    // TODO: Change this to be more descriptive
+    TooManyTokensAfterType(Range),
+    NoEqualAfterTypeName(Range),
 }
 
 impl From<Error> for Report {
@@ -106,6 +110,13 @@ impl From<Error> for Report {
                 range,
                 hint: None,
             },
+            Error::ExpectedNameAfterType(range) => Report {
+                message: "No name found after 'type' keyword".to_string(),
+                range,
+                hint: Some("Type definitions are of the form 'type <name> = <type>'".to_string()),
+            },
+            Error::NoEqualAfterTypeName(_) => todo!(),
+            Error::TooManyTokensAfterType(_) => todo!(),
         }
     }
 }
@@ -151,7 +162,7 @@ fn parse_program(state: &mut State) -> Result<ast::Program, ()> {
 
         let Ok(statement) = parse_statement(state) else {
             skip_until_indent(0, state);
-            state.pop();
+            // state.pop();
             continue;
         };
         statements.push(statement);
@@ -167,11 +178,26 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
         return parse_for(state);
     }
 
-    if let Some(statement) = parse_if(state)? {
-        return Ok(statement);
+    if state.pop_token_eq(Keyword::Type) {
+        return parse_type_definition(state);
+    }
+
+    if state.pop_token_eq(Keyword::If) {
+        return parse_if(state);
     }
 
     let expr = parse_expr(state);
+
+    if state.pop_token_eq(Symbol::Equal) {
+        let rhs = parse_expr(state);
+
+        let Ok(ast::Expr::Var(name, _)) = &expr else {
+            state.errors.push(Error::CouldNotAssignTo(expr?));
+            return Err(());
+        };
+
+        return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), rhs?));
+    }
 
     if state.pop_token_eq(Symbol::Colon) {
         let type_ = parse_type_expr(state).and_then(|type_| {
@@ -202,11 +228,9 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
             return Err(());
         };
 
-        return Ok(ast::Statement::VarDecl(
-            name.first().unwrap().clone(),
-            type_?,
-            rhs?,
-        ));
+        todo!("type annotations in variable declarations");
+
+        return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), rhs?));
     }
 
     expr.map(ast::Statement::Expr)
@@ -246,6 +270,10 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
         return Ok(Some(ast::Expr::Literal(literal, range)));
     }
 
+    if state.pop_token_eq(Symbol::OpenSquare) {
+        return parse_array(state).map(Some);
+    }
+
     if state.pop_token_eq(Symbol::OpenParen) {
         // TODO: Skip until close paren
         let expr = parse_expr(state)?;
@@ -253,6 +281,14 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
             todo!()
         }
         return Ok(Some(expr));
+    }
+
+    if state.pop_token_eq(Keyword::New) {
+        let Some(name) = parse_qualified_name(state)? else {
+            todo!()
+        };
+        let range = start | state.prev_range();
+        return Ok(Some(ast::Expr::New(name, range)));
     }
 
     if let Some(name) = parse_qualified_name(state)? {
@@ -281,6 +317,35 @@ fn parse_type_expr(state: &mut State) -> Result<Option<ast::TypeExpr>, ()> {
     }
 
     Ok(None)
+}
+
+fn parse_type_definition(state: &mut State) -> Result<ast::Statement, ()> {
+    let name = state.pop_token_ident().ok_or_else(|| {
+        state
+            .errors
+            .push(Error::ExpectedNameAfterType(state.curr_range()));
+    })?;
+
+    let start = state.curr_range();
+    let skipped = skip_until(state, Symbol::Equal);
+    if skipped {
+        state
+            .errors
+            .push(Error::TooManyTokensAfterType(state.curr_range() | start));
+    }
+
+    if !state.pop_token_eq(Symbol::Equal) {
+        state
+            .errors
+            .push(Error::NoEqualAfterTypeName(state.curr_range() | start));
+        return Err(());
+    }
+
+    let Some(equal_to) = parse_type_expr(state)? else {
+        todo!()
+    };
+
+    Ok(ast::Statement::Type(Name::from_str(name), equal_to))
 }
 
 fn parse_import(state: &mut State) -> Result<ast::Statement, ()> {
@@ -339,11 +404,7 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
     ))
 }
 
-fn parse_if(state: &mut State) -> Result<Option<ast::Statement>, ()> {
-    if !state.pop_token_eq(Keyword::If) {
-        return Ok(None);
-    }
-
+fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
     let condition = parse_expr(state);
     let range_after_expr = state.curr_range();
 
@@ -372,7 +433,48 @@ fn parse_if(state: &mut State) -> Result<Option<ast::Statement>, ()> {
         todo!()
     };
 
-    Ok(Some(ast::Statement::If(condition?, block, None)))
+    Ok(ast::Statement::If(condition?, block, None))
+}
+
+fn parse_array(state: &mut State) -> Result<ast::Expr, ()> {
+    let start_range = state.prev_range();
+
+    if state.pop_token_eq(Symbol::CloseSquare) {
+        return Ok(ast::Expr::Array(
+            Vec::new(),
+            start_range | state.prev_range(),
+        ));
+    }
+
+    let mut elements = Vec::new();
+
+    loop {
+        let element = parse_expr(state);
+        elements.push(element);
+
+        // After an element, there can be a comma. After the optional comma, there can be a closing
+        // square bracket, or another element.
+        if !state.pop_token_eq(Symbol::Comma) {
+            if state.pop_token_eq(Symbol::CloseSquare) {
+                break;
+            } else {
+                skip_until_pred(state, |token| {
+                    matches!(token, Token::Symbol(Symbol::Comma | Symbol::CloseSquare))
+                });
+                todo!()
+            }
+        }
+        if state.pop_token_eq(Symbol::CloseSquare) {
+            break;
+        }
+    }
+
+    let elements = elements.into_iter().collect::<Result<_, ()>>();
+
+    Ok(ast::Expr::Array(
+        elements?,
+        start_range | state.prev_range(),
+    ))
 }
 
 fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
@@ -451,6 +553,10 @@ fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
         return Ok(Some(ast::Literal::I32(int)));
     };
 
+    if state.pop_token_eq(Symbol::Unit) {
+        return Ok(Some(ast::Literal::Unit));
+    }
+
     Ok(None)
 }
 
@@ -486,13 +592,16 @@ fn skip_until_indent(indent: usize, state: &mut State) {
     }
 }
 
-fn skip_until<'a>(state: &mut State, token: impl Into<Token<'a>>) {
+fn skip_until<'a>(state: &mut State, token: impl Into<Token<'a>>) -> bool {
+    let mut ret = false;
     let token = token.into();
     while state.curr_token() != Some(token) {
         if state.pop().is_none() {
             break;
         }
+        ret = true;
     }
+    ret
 }
 
 fn skip_until_pred(state: &mut State, predicate: impl Fn(&Token) -> bool) -> bool {

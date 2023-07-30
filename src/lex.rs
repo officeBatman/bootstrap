@@ -312,7 +312,7 @@ mod tests {
                 Token::NewLine(NewLine::NewLine { indent: 0 }).into_located(12..13),
                 Token::Ident("y").into_located(13..14),
                 Token::Symbol(Symbol::Colon).into_located(14..15),
-                Token::Ident("type").into_located(16..20),
+                Token::Keyword(Keyword::Type).into_located(16..20),
                 Token::Symbol(Symbol::Equal).into_located(21..22),
                 Token::Ident("x").into_located(23..24),
                 Token::Symbol(Symbol::Dot).into_located(25..26),

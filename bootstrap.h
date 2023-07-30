@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+typedef int32_t bootstrap_i32;
+
 typedef struct str_head {
     uint32_t rc; 
     // After the rc field - a bunch of chars as the content.
@@ -13,6 +15,8 @@ typedef struct str {
     size_t length;
     str_head* head_ptr;
 } str;
+
+typedef str bootstrap_str;
 
 #define DEFINE_ARRAY_TYPE(TYPE, NAME) \
     typedef struct NAME { \
@@ -42,6 +46,10 @@ static inline str make_str(const char* c_str) {
 }
 
 static inline char bootstrap_std_str_get(str string, int32_t index) {
+    if (index < 0 || index >= string.length) {
+        // TODO: Error handling.
+        return '\0';
+    }
     return str_c_string(string)[index];
 }
 
@@ -72,6 +80,12 @@ static inline void bootstrap_std_io_print_bool(bool b) {
     printf("%s\n", b ? "true" : "false");
 }
 
+static inline str bootstrap_std_io_input(int) {
+    char buffer[1024];
+    fgets(buffer, 1024, stdin);
+    return make_str(buffer);
+}
+
 static inline str bootstrap_std_io_read(str filename) {
     FILE* file = fopen(str_c_string(filename), "rb");
     if (file == NULL) {
@@ -99,6 +113,10 @@ static inline int32_t bootstrap_std_arr_len(array_0 arr) {
 }
 
 static inline str bootstrap_std_arr_get(array_0 arr, int32_t i) {
+    if (i < 0 || i >= arr.length) {
+        // TODO: Error handling.
+        return make_str("");
+    }
     return arr.data[i];
 }
 
@@ -138,4 +156,3 @@ static inline array_0 bootstrap_std_str_split(str string, str sep) {
     }
     return ret;
 }
-

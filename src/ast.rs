@@ -12,9 +12,10 @@ pub struct Program {
 pub enum Statement {
     Import(QualifiedName),
     Expr(Expr),
-    VarDecl(Name, TypeExpr, Expr),
+    VarDecl(Name, Expr),
     For(Name, Expr, Expr, Vec<Statement>),
     If(Expr, Vec<Statement>, Option<Vec<Statement>>),
+    Type(Name, TypeExpr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub enum Expr {
     Var(QualifiedName, Range),
     Literal(Literal, Range),
     Apply { func: Box<Expr>, args: Vec<Expr> },
+    New(QualifiedName, Range),
+    Array(Vec<Expr>, Range),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +32,7 @@ pub enum Literal {
     Str(Name),
     Char(char),
     I32(i32),
+    Unit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,8 +44,6 @@ pub enum TypeExpr {
 impl Expr {
     pub fn range(&self) -> Range {
         match self {
-            Expr::Var(_, range) => *range,
-            Expr::Literal(_, range) => *range,
             Expr::Apply { func, args } => {
                 let mut range = func.range();
                 for arg in args {
@@ -49,6 +51,10 @@ impl Expr {
                 }
                 range
             }
+            Expr::Var(_, range)
+            | Expr::Literal(_, range)
+            | Expr::Array(_, range)
+            | Expr::New(_, range) => *range,
         }
     }
 }
@@ -60,4 +66,3 @@ impl TypeExpr {
         }
     }
 }
-
