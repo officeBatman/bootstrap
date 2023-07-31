@@ -81,8 +81,22 @@ pub fn compile(
 ) -> Result<c::Program, Vec<Error>> {
     let mut state = State {
         scope: initial_scope,
-        ..State::default()
+        errors: vec![],
+        name_counter: 0,
+        array_types: [(
+            Type::Named(vec!["str".into()]).into(),
+            Array {
+                type_name: "bootstrap_array_str".into(),
+                make_name: "bootstrap_make_array_str".into(),
+            },
+        )]
+        .into(),
     };
+    let array_types_originals = state
+        .array_types
+        .keys()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
 
     let Ok(mut block) = compile_block(&program.statements, &mut state) else {
         return Err(state.errors);
@@ -106,6 +120,10 @@ pub fn compile(
     let mut error = false;
     let mut declarations = vec![c::TopLevelDeclaration::Function(entry_point)];
     for element_type in state.array_types.keys().cloned().collect::<Vec<_>>() {
+        // Hack: Skip the `str` type, which is a special case.
+        if array_types_originals.contains(&element_type) {
+            continue;
+        }
         let Ok(array_declarations) = compile_array(&element_type, &mut state) else {
             error = true;
             continue;
@@ -400,7 +418,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                 },
             );
 
-            let var_name = state.generate_name("array_var");
+            let var_name = state.generate_name(&"array_var".into());
             let var_c_name = compile_name(&var_name);
 
             let array = state.get_array(&first_type);
@@ -468,14 +486,17 @@ fn compile_type(t: &Type, state: &mut State) -> Rc<c::TypeExpr> {
 }
 
 fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
-    let i32_type = Rc::new(Type::Named(vec!["i32".into()]));
+    fn typ(name: impl Into<Name>) -> Rc<Type> {
+        Rc::new(Type::Named(vec![name.into()]))
+    }
+
     match literal {
         Literal::Str(s) => Ok((
             "make_str".var().call(vec![s.clone().literal()]),
-            Rc::new(Type::Named(vec!["str".into()])),
+            typ("str"),
         )),
-        Literal::I32(i) => Ok((c::Expr::Int(*i), i32_type)),
-        Literal::Char(ch) => Ok((ch.literal(), i32_type)),
+        Literal::I32(i) => Ok((i.literal(), typ("i32"))),
+        Literal::Char(ch) => Ok((ch.literal(), typ("char"))),
         Literal::Unit => Ok((0.literal(), Type::Unit.into())),
     }
 }
@@ -488,7 +509,7 @@ fn total_range(ranges: impl IntoIterator<Item = Range>, default: Range) -> Range
     ranges.into_iter().reduce(|a, b| a | b).unwrap_or(default)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct State {
     scope: Vec<ScopeMember>,
     errors: Vec<Error>,
@@ -574,14 +595,14 @@ impl State {
         Err(())
     }
 
-    pub fn generate_name(&mut self, prefix: &str) -> QualifiedName {
-        let name = format!("{}{}", prefix, self.name_counter);
+    pub fn generate_name(&mut self, prefix: &Name) -> QualifiedName {
+        let name = vec![prefix.clone(), self.name_counter.to_string().into()];
         self.name_counter += 1;
-        vec![name.into()]
+        name
     }
 
     fn make_array(&mut self) -> Array {
-        let name = self.generate_name("array");
+        let name = self.generate_name(&"array".into());
         let type_name = compile_name(&name);
         let make_name = compile_name(&vec!["make".into()].extend_pipe(name));
         Array {

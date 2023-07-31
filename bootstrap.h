@@ -18,14 +18,6 @@ typedef struct str {
 
 typedef str bootstrap_str;
 
-#define DEFINE_ARRAY_TYPE(TYPE, NAME) \
-    typedef struct NAME { \
-        size_t length; \
-        TYPE* data; \
-    } NAME;
-
-DEFINE_ARRAY_TYPE(str, array_0)
-
 static inline char* str_c_string(str string) {
     return (char*)(string.head_ptr + 1);
 }
@@ -108,11 +100,23 @@ static inline str bootstrap_std_io_read(str filename) {
     return out;
 }
 
-static inline int32_t bootstrap_std_arr_len(array_0 arr) {
+typedef struct bootstrap_array_str {
+    size_t length;
+    str* data;
+} bootstrap_array_str;
+
+static inline bootstrap_array_str bootstrap_make_array_str(int32_t len) {
+    bootstrap_array_str arr;
+    arr.length = len;
+    arr.data = (str*)malloc(sizeof(str) * len);
+    return arr;
+}
+
+static inline int32_t bootstrap_std_arr_len(bootstrap_array_str arr) {
     return arr.length;
 }
 
-static inline str bootstrap_std_arr_get(array_0 arr, int32_t i) {
+static inline str bootstrap_std_arr_get(bootstrap_array_str arr, int32_t i) {
     if (i < 0 || i >= arr.length) {
         // TODO: Error handling.
         return make_str("");
@@ -120,17 +124,17 @@ static inline str bootstrap_std_arr_get(array_0 arr, int32_t i) {
     return arr.data[i];
 }
 
-static inline array_0 bootstrap_std_arr_append(array_0 arr, str item) {
+static inline bootstrap_array_str bootstrap_std_arr_append(bootstrap_array_str arr, str item) {
     int32_t len = arr.length;
     str* data = (str*)malloc(sizeof(str) * (len + 1));
     memcpy(data, arr.data, sizeof(str) * len);
     data[len] = item;
-    array_0 out = {(size_t)len + 1, data};
+    bootstrap_array_str out = {(size_t)len + 1, data};
     return out;
 }
 
-static inline array_0 bootstrap_std_str_split(str string, str sep) {
-    array_0 ret = {0, NULL};
+static inline bootstrap_array_str bootstrap_std_str_split(str string, str sep) {
+    bootstrap_array_str ret = {0, NULL};
     int32_t len = string.length;
     int32_t sep_len = sep.length;
 
@@ -139,7 +143,7 @@ static inline array_0 bootstrap_std_str_split(str string, str sep) {
     while (start < len && end < len) {
         if (memcmp(str_c_string(string) + end, str_c_string(sep), sep_len) == 0) {
             str item = bootstrap_std_str_substr(string, start, end);
-            array_0 appendend = bootstrap_std_arr_append(ret, item);
+            bootstrap_array_str appendend = bootstrap_std_arr_append(ret, item);
             free(ret.data);
             ret = appendend;
             start = end + sep_len;
@@ -150,7 +154,7 @@ static inline array_0 bootstrap_std_str_split(str string, str sep) {
     }
     if (start < len) {
         str item = bootstrap_std_str_substr(string, start, len);
-        array_0 appendend = bootstrap_std_arr_append(ret, item);
+        bootstrap_array_str appendend = bootstrap_std_arr_append(ret, item);
         free(ret.data);
         ret = appendend;
     }
