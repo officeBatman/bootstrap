@@ -562,7 +562,7 @@ impl Display for Type {
                 let x = qualified_name.join("::");
                 write!(f, "{}", x)
             }
-            Type::Array(t) => write!(f, "[{}]", t),
+            Type::Array(t) => write!(f, "{}[]", t),
             Type::Func(params, ret) => {
                 let params = params
                     .iter()
