@@ -1,4 +1,4 @@
-use crate::range::{Range, Pos};
+use crate::{range::{Range, Pos}, global::ExtendPipe};
 use std::fmt::{self, Display, Formatter};
 
 pub struct Report {
@@ -48,27 +48,24 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
 
     if first_line_number == last_line_number {
         let first_line_start = line_start(source, range.0);
-        let range_with_line_bellow = range.extend_start(first_line_start - 2);
+        let range_with_line_bellow = range.extend_start(first_line_start.saturating_sub(2));
         let lines = lines(source, range_with_line_bellow);
+        let mut formatted_lines = lines.into_iter().enumerate().map(|(i, line)| {
+            format!(
+                "{:width$} | {}",
+                first_line_number + i,
+                line,
+            )
+        }).collect::<Vec<_>>();
 
-        return vec![
+        return formatted_lines.extend_pipe_one(
             format!(
-                "{:width$} | {}",
-                "",
-                lines[0],
-            ),
-            format!(
-                "{:width$} | {}",
-                first_line_number + 1,
-                lines[1],
-            ),
-            format!(
-                "{} | {}{}",
+                "{}   {}{}",
                 " ".repeat(width),
                 " ".repeat(range.0 - line_start(source, range.0)),
                 "^".repeat(range.1 - range.0)
-            ),
-        ];
+            )
+        );
     }
 
     dbg!(width);
