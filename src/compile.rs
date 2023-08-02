@@ -1,79 +1,20 @@
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
 use std::rc::Rc;
 
-use crate::ast::{Expr, Literal, Program, QualifiedName, Statement, TypeExpr};
-use crate::c;
-use crate::c::combine_traits::*;
-use crate::error::Report;
-use crate::global::{with_variable, ExtendPipe, Withable};
-use crate::name::Name;
-use crate::range::Range;
+use crate::{
+    ast::{Expr, Literal, Program, QualifiedName, Statement, TypeExpr},
+    c::{self, combine_traits::*},
+    global::{with_variable, ExtendPipe, Withable},
+    name::Name,
+    range::Range,
+};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Error {
-    UnknownName(QualifiedName, Range),
-    UnknownTypeName(Name, Range),
-    NotATypeName(ScopeMember, Range),
-    NotAFunction(Rc<Type>, Range),
-    WrongArguments {
-        expected: Vec<Rc<Type>>,
-        got: Vec<Rc<Type>>,
-        range: Range,
-    },
-    IfConditionMustReturnBool {
-        was: Rc<Type>,
-        range: Range,
-    },
-}
+mod error;
+mod state;
+mod typ;
 
-impl From<Error> for Report {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::UnknownName(name, range) => Report {
-                message: format!("The name '{name:?}' is not defined in the current scope"),
-                range,
-                hint: None, // TODO: Suggest closest name.
-            },
-            Error::NotAFunction(typ, range) => Report {
-                message: format!("Tried to call '{typ}' as a function"),
-                range,
-                hint: None,
-            },
-            Error::WrongArguments {
-                expected,
-                got,
-                range,
-            } => Report {
-                message: format!(
-                    "Applied wrong arguments to function. Expected '{}', got '{}'",
-                    DisplayTypes(&expected),
-                    DisplayTypes(&got),
-                ),
-                range,
-                hint: Some(
-                    "Check the signature of the function and the types of your arguments"
-                        .to_string(),
-                ),
-            },
-            Error::UnknownTypeName(name, range) => Report {
-                message: format!("The type '{name}' is not defined in the current scope"),
-                range,
-                hint: None, // TODO: Suggest closest name.
-            },
-            Error::NotATypeName(member, range) => Report {
-                message: format!("Tried to use '{member:?}' as a type"),
-                range,
-                hint: None,
-            },
-            Error::IfConditionMustReturnBool { was, range } => Report {
-                message: "This if condition did not return bool".to_string(),
-                range,
-                hint: Some(format!("It returned '{:?}'", was)),
-            },
-        }
-    }
-}
+pub use error::Error;
+pub use state::{Array, ScopeMember, State};
+pub use typ::Type;
 
 pub fn compile(
     program: &Program,
@@ -491,10 +432,7 @@ fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
     }
 
     match literal {
-        Literal::Str(s) => Ok((
-            "make_str".var().call(vec![s.clone().literal()]),
-            typ("str"),
-        )),
+        Literal::Str(s) => Ok(("make_str".var().call(vec![s.clone().literal()]), typ("str"))),
         Literal::I32(i) => Ok((i.literal(), typ("i32"))),
         Literal::Char(ch) => Ok((ch.literal(), typ("char"))),
         Literal::Unit => Ok((0.literal(), Type::Unit.into())),
@@ -507,117 +445,6 @@ fn compile_name(name: &QualifiedName) -> Name {
 
 fn total_range(ranges: impl IntoIterator<Item = Range>, default: Range) -> Range {
     ranges.into_iter().reduce(|a, b| a | b).unwrap_or(default)
-}
-
-#[derive(Debug)]
-struct State {
-    scope: Vec<ScopeMember>,
-    errors: Vec<Error>,
-    array_types: HashMap<Rc<Type>, Array>,
-    name_counter: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Array {
-    type_name: Name,
-    make_name: Name,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScopeMember {
-    Module {
-        name: Name,
-        members: Vec<ScopeMember>,
-    },
-    Var {
-        name: Name,
-        qualified_name: QualifiedName,
-        typ: Rc<Type>,
-    },
-    TypeVar {
-        name: Name,
-        qualified_name: QualifiedName,
-        equal_to: Rc<Type>,
-    },
-    NewType {
-        name: Name,
-        qualified_name: QualifiedName,
-        typ: Rc<Type>,
-    },
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Type {
-    Unit,
-    Func(Vec<Rc<Type>>, Rc<Type>),
-    Named(QualifiedName),
-    Array(Rc<Type>),
-}
-
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Type::Unit => write!(f, "unit"),
-            Type::Named(qualified_name) => {
-                let x = qualified_name.join("::");
-                write!(f, "{}", x)
-            }
-            Type::Array(t) => write!(f, "{}[]", t),
-            Type::Func(params, ret) => {
-                let params = params
-                    .iter()
-                    .map(|t| t.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "({}) -> {}", params, ret)
-            }
-        }
-    }
-}
-
-struct DisplayTypes<'a>(&'a [Rc<Type>]);
-
-impl<'a> Display for DisplayTypes<'a> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let types = self
-            .0
-            .iter()
-            .map(|t| t.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        write!(f, "{}", types)
-    }
-}
-
-impl State {
-    pub fn error<T>(&mut self, error: Error) -> Result<T, ()> {
-        self.errors.push(error);
-        Err(())
-    }
-
-    pub fn generate_name(&mut self, prefix: &Name) -> QualifiedName {
-        let name = vec![prefix.clone(), self.name_counter.to_string().into()];
-        self.name_counter += 1;
-        name
-    }
-
-    fn make_array(&mut self) -> Array {
-        let name = self.generate_name(&"array".into());
-        let type_name = compile_name(&name);
-        let make_name = compile_name(&vec!["make".into()].extend_pipe(name));
-        Array {
-            type_name,
-            make_name,
-        }
-    }
-
-    pub fn get_array(&mut self, element_type: &Rc<Type>) -> &Array {
-        if !self.array_types.contains_key(element_type) {
-            let array = self.make_array();
-            self.array_types.insert(element_type.clone(), array);
-        }
-        self.array_types.get(element_type).unwrap()
-    }
 }
 
 fn find_in_scope<'a>(scope: &'a [ScopeMember], name: &str) -> Option<&'a ScopeMember> {

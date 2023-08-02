@@ -154,6 +154,14 @@ fn initial_scope() -> Vec<ScopeMember> {
                                 i32_type.clone(),
                             ).into(),
                         },
+                        ScopeMember::Var {
+                            name: "append".into(),
+                            qualified_name: vec!["std".into(), "arr".into(), "append".into()],
+                            typ: Type::Func(
+                                vec![Type::Array(str_type.clone()).into(), str_type.clone()],
+                                Type::Array(str_type.clone()).into(),
+                            ).into(),
+                        },
                     ],
                 },
             ],
