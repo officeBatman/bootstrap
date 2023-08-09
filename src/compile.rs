@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    ast::{Expr, Literal, Program, QualifiedName, Statement, TypeExpr},
+    ast::{Expr, Literal, MatchArm, Pattern, Program, QualifiedName, Statement, TypeExpr},
     c::{self, combine_traits::*},
-    global::{with_variable, ExtendPipe, Withable},
+    global::{with_variable, with_variables, ExtendPipe, Withable},
     name::Name,
     range::Range,
 };
@@ -141,7 +141,7 @@ fn compile_array(
 fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
     let mut ret = Ok(vec![]);
     for stmt in statements {
-        let c_stmt = statement(stmt, state);
+        let c_stmt = compile_statement(stmt, state);
         ret = ret.and_then(|mut v| {
             v.extend(c_stmt?);
             Ok(v)
@@ -150,7 +150,7 @@ fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block
     ret
 }
 
-fn statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
+fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
     match statement {
         Statement::Import(name) => {
             let Some(member) = find_in_scope_nested(&state.scope, name) else {
@@ -307,7 +307,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
 
             if &arg_types != expected_arg_types {
                 let range = total_range(args.iter().map(|a| a.range()), func.range());
-                return state.error(Error::WrongArguments {
+                state.error_and_continue(Error::WrongArguments {
                     expected: expected_arg_types.clone(),
                     got: arg_types,
                     range,
@@ -380,6 +380,63 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
 
             Ok((c_block, var_c_name.var(), Type::Array(first_type).into()))
         }
+        Expr::Match(inp, arms, _) => {
+            let (c_inp_prelude, c_inp_expr, inp_type) = compile_expr(inp, state)?;
+
+            let compiled_arms = arms
+                .iter()
+                // Compile the patterns and the match arm bodies.
+                .map(|MatchArm { pattern, body }| {
+                    let compiled_pattern = compile_pattern(pattern, &c_inp_expr, &inp_type, state)?;
+                    let variables = compiled_pattern.variables.iter().cloned();
+                    with_variables!(state.scope, variables, {
+                        Ok((compiled_pattern, compile_expr(body, state)?))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let out_var_name = state.generate_name(&"match_out".into());
+            let c_out_var_name = compile_name(&out_var_name);
+
+            let (match_ifs, out_type) = compiled_arms
+                .into_iter()
+                // Comine everything into a block.
+                // Iterate backwards and build a pyramid of ifs.
+                .rfold(
+                    (vec![], None),
+                    |(false_block, typ), (pattern, (body_prelude, body_c_expr, body_type))| {
+                        let assign_out = c_out_var_name.clone().var().assign(body_c_expr);
+                        let true_block = body_prelude.extend_pipe_one(assign_out);
+                        let typ = match typ {
+                            None => Some(body_type),
+                            Some(typ) => {
+                                if typ == body_type {
+                                    Some(typ)
+                                } else {
+                                    todo!()
+                                }
+                            }
+                        };
+                        (
+                            pattern.prelude.extend_pipe_one(
+                                pattern.condition.if_then_else(true_block, false_block),
+                            ),
+                            typ,
+                        )
+                    },
+                );
+
+            let Some(out_type) = out_type else {
+                todo!()
+            };
+
+            let out_c_type = compile_type(&out_type, state);
+
+            let prelude =
+                vec![out_c_type.declare(c_out_var_name.clone(), None)].extend_pipe(match_ifs);
+
+            Ok((prelude, c_out_var_name.var(), out_type))
+        }
     }
 }
 
@@ -436,6 +493,40 @@ fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
         Literal::I32(i) => Ok((i.literal(), typ("i32"))),
         Literal::Char(ch) => Ok((ch.literal(), typ("char"))),
         Literal::Unit => Ok((0.literal(), Type::Unit.into())),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompiledPattern {
+    variables: Vec<ScopeMember>,
+    /// A list of statements initializing the variables that should run before
+    /// the condition.
+    prelude: Vec<c::Statement>,
+    condition: c::Expr,
+}
+
+fn compile_pattern(
+    pattern: &Pattern,
+    inp_expr: &c::Expr,
+    inp_type: &Rc<Type>,
+    state: &mut State,
+) -> Result<CompiledPattern, ()> {
+    match pattern {
+        Pattern::Var(name, _) => {
+            let c_name = compile_name(&vec![name.clone()]);
+            let c_inp_type = compile_type(inp_type, state);
+            Ok(CompiledPattern {
+                variables: vec![ScopeMember::Var {
+                    name: name.clone(),
+                    qualified_name: vec![name.clone()],
+                    typ: inp_type.clone(),
+                }],
+                prelude: vec![inp_expr.clone().variable(c_name, c_inp_type)],
+                condition: 1.literal(),
+            })
+        }
+        Pattern::New(_, _, _) => todo!(),
+        Pattern::Literal(_, _) => todo!(),
     }
 }
 

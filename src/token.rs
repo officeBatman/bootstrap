@@ -27,10 +27,13 @@ define_plain_enum! { pub enum Keyword {
     Do "do",
     Import "import",
     Type "type",
+    Match "match",
     New "new"
 } }
 
 define_plain_enum! { pub enum Symbol {
+    FatArrow "=>",
+    Arrow "->",
     Equal "=",
     DoubleColon "::",
     Colon ":",

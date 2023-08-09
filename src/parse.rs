@@ -237,6 +237,10 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
 }
 
 fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
+    if state.pop_token_eq(Keyword::Match) {
+        return parse_match(state);
+    }
+
     let Some(first) = parse_atom(state)? else {
         state.errors.push(Error::ExpectedExpression(state.curr_range()));
         return Err(());
@@ -384,7 +388,7 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
     let indent = state.indent();
     state.pop_indent_same(indent);
 
-    // TODO: Allow this to be a block.
+    // TODO: Allow this to be a statement.
     let body = parse_block(state);
 
     let Some(name) = name else {
@@ -427,7 +431,23 @@ fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
 
     let block = parse_block(state);
 
-    // TODO: Parse else
+    if state.pop_token_eq(Keyword::Else) {
+        let else_block = parse_block(state);
+
+        let Some(block) = block.transpose() else {
+            todo!()
+        };
+
+        let Some(else_block) = else_block.transpose() else {
+            todo!()
+        };
+
+        return Ok(ast::Statement::If(
+            condition?,
+            block?,
+            Some(else_block?),
+        ));
+    }
 
     let Some(block) = block? else {
         todo!()
@@ -477,6 +497,63 @@ fn parse_array(state: &mut State) -> Result<ast::Expr, ()> {
     ))
 }
 
+fn parse_match(state: &mut State) -> Result<ast::Expr, ()> {
+    // The match expression starts at the 'match' keyword that has already been popped.
+    let start_range = state.prev_range();
+
+    let inp = parse_expr(state)?;
+
+    if !state.pop_token_eq(Symbol::OpenCurly) {
+        todo!()
+    }
+
+    let outer_indent = state.indent();
+    if !state.pop_indent_in() {
+        todo!()
+    }
+
+    let mut arms = Vec::new();
+    while !state.pop_indent_same(outer_indent) {
+        let inner_indent = state.indent();
+        let arm = parse_match_arm(state);
+        match arm {
+            Err(()) => {
+                skip_until_indent(inner_indent, state);
+                state.pop();
+            }
+            Ok(arm) => arms.push(arm),
+        }
+    }
+
+    if !state.pop_token_eq(Symbol::CloseCurly) {
+        todo!()
+    }
+    let range = start_range | state.prev_range();
+
+    Ok(ast::Expr::Match(Box::new(inp), arms, range))
+}
+
+fn parse_match_arm(state: &mut State) -> Result<ast::MatchArm, ()> {
+    let pattern = parse_pattern(state)?;
+
+    if !state.pop_token_eq(Symbol::FatArrow) {
+        todo!()
+    }
+
+    let body = parse_expr(state)?;
+
+    Ok(ast::MatchArm { pattern, body })
+}
+
+fn parse_pattern(state: &mut State) -> Result<ast::Pattern, ()> {
+    if let Some(name) = state.pop_token_ident() {
+        let range = state.prev_range();
+        return Ok(ast::Pattern::Var(Name::from_str(name), range));
+    }
+
+    todo!()
+}
+
 fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
     if !state.pop_token_eq(Symbol::OpenCurly) {
         return Ok(None);
@@ -493,6 +570,9 @@ fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
         let Ok(statement) = parse_statement(state) else {
             skip_until_indent(inner_indent, state);
             state.pop();
+            if state.curr_token().is_none() {
+                break;
+            }
             continue;
         };
 
@@ -512,7 +592,7 @@ fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
     }
 
     if !state.pop_token_eq(Symbol::CloseCurly) {
-        todo!()
+        dbg!("Error!!");
     }
 
     statements.map(Some)
@@ -615,6 +695,7 @@ fn skip_until_pred(state: &mut State, predicate: impl Fn(&Token) -> bool) -> boo
     ret
 }
 
+#[derive(Debug, Clone)]
 struct State<'source> {
     tokens: TokenReader<'source>,
     errors: Vec<Error>,

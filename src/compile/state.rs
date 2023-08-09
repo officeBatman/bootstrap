@@ -51,6 +51,10 @@ impl State {
         Err(())
     }
 
+    pub fn error_and_continue(&mut self, error: Error) {
+        self.errors.push(error);
+    }
+
     pub fn generate_name(&mut self, prefix: &Name) -> QualifiedName {
         let name = vec![prefix.clone(), self.name_counter.to_string().into()];
         self.name_counter += 1;

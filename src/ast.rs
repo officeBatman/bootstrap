@@ -25,6 +25,7 @@ pub enum Expr {
     Apply { func: Box<Expr>, args: Vec<Expr> },
     New(QualifiedName, Range),
     Array(Vec<Expr>, Range),
+    Match(Box<Expr>, Vec<MatchArm>, Range),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,19 @@ pub enum TypeExpr {
     Array(Box<TypeExpr>, Range),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pattern {
+    Var(Name, Range),
+    Literal(Literal, Range),
+    New(QualifiedName, Box<Pattern>, Range),
+}
+
 impl Expr {
     pub fn range(&self) -> Range {
         match self {
@@ -54,6 +68,7 @@ impl Expr {
             Expr::Var(_, range)
             | Expr::Literal(_, range)
             | Expr::Array(_, range)
+            | Expr::Match(.., range)
             | Expr::New(_, range) => *range,
         }
     }

@@ -3,8 +3,11 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <string.h>
+#include <ctype.h>
 
 typedef int32_t bootstrap_i32;
+typedef bool bootstrap_bool;
+typedef char bootstrap_char;
 
 typedef struct str_head {
     uint32_t rc; 
@@ -75,6 +78,8 @@ static inline void bootstrap_std_io_print_bool(bool b) {
 static inline str bootstrap_std_io_input(int) {
     char buffer[1024];
     fgets(buffer, 1024, stdin);
+    if (buffer[strlen(buffer) - 1] == '\n')
+        buffer[strlen(buffer) - 1] = '\0';
     return make_str(buffer);
 }
 
@@ -159,4 +164,33 @@ static inline bootstrap_array_str bootstrap_std_str_split(str string, str sep) {
         ret = appendend;
     }
     return ret;
+}
+
+static inline bootstrap_array_str bootstrap_std_str_split_lines(str string) {
+    return bootstrap_std_str_split(string, make_str("\n"));
+}
+
+static inline str bootstrap_std_str_from_char(char ch) {
+    str out = make_str_len(1);
+    str_c_string(out)[0] = ch;
+    return out;
+}
+
+static inline bool bootstrap_not(bool b) {
+    return !b;
+}
+
+static inline str bootstrap_std_str_strip(str string) {
+    int32_t start = 0;
+    int32_t end = string.length - 1;
+    if (end < 0) {
+        return string;
+    }
+    while (start <= end && isspace(str_c_string(string)[start])) {
+        start++;
+    }
+    while (end > start && isspace(str_c_string(string)[end])) {
+        end--;
+    }
+    return bootstrap_std_str_substr(string, start, end + 1);
 }
