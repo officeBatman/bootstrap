@@ -35,6 +35,7 @@ define_plain_enum! { pub enum Symbol {
     FatArrow "=>",
     Arrow "->",
     Equal "=",
+    ColonEqual ":=",
     DoubleColon "::",
     Colon ":",
     DotDot "..",

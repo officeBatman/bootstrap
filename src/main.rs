@@ -206,7 +206,7 @@ fn initial_scope() -> Vec<ScopeMember> {
         ScopeMember::TypeVar {
             name: "i32".into(),
             qualified_name: vec!["i32".into()],
-            equal_to: i32_type,
+            equal_to: i32_type.clone(),
         },
         ScopeMember::TypeVar {
             name: "str".into(),
@@ -231,12 +231,17 @@ fn initial_scope() -> Vec<ScopeMember> {
         ScopeMember::Var {
             name: "not".into(),
             qualified_name: vec!["not".into()],
-            typ: Type::Func(vec![bool_type.clone()], bool_type).into(),
+            typ: Type::Func(vec![bool_type.clone()], bool_type.clone()).into(),
         },
         ScopeMember::TypeVar {
             name: "char".into(),
             qualified_name: vec!["char".into()],
             equal_to: Type::Named(vec!["char".into()]).into(),
+        },
+        ScopeMember::Var {
+            name: "gt".into(),
+            qualified_name: vec!["gt".into()],
+            typ: Type::Func(vec![i32_type.clone(), i32_type], bool_type).into(),
         },
     ]
 }

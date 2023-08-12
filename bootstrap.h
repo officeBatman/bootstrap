@@ -194,3 +194,7 @@ static inline str bootstrap_std_str_strip(str string) {
     }
     return bootstrap_std_str_substr(string, start, end + 1);
 }
+
+static inline bool bootstrap_gt(bootstrap_i32 a, bootstrap_i32 b) {
+    return a > b;
+}

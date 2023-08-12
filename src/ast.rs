@@ -16,6 +16,7 @@ pub enum Statement {
     For(Name, Expr, Expr, Vec<Statement>),
     If(Expr, Vec<Statement>, Option<Vec<Statement>>),
     Type(Name, TypeExpr),
+    Assign(QualifiedName, Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

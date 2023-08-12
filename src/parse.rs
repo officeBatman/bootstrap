@@ -233,6 +233,16 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
         return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), rhs?));
     }
 
+    if state.pop_token_eq(Symbol::ColonEqual) {
+        let rhs = parse_expr(state);
+        let Ok(ast::Expr::Var(name, _)) = expr else {
+            state.errors.push(Error::CouldNotAssignTo(expr?));
+            return Err(());
+        };
+
+        return Ok(ast::Statement::Assign(name, rhs?));
+    }
+
     expr.map(ast::Statement::Expr)
 }
 

@@ -267,6 +267,27 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             });
             Ok(c::Block::new())
         }
+        Statement::Assign(var_name, expr) => {
+            let Some(scope_member) = find_in_scope_nested(&state.scope, var_name) else {
+                todo!("Error: Variable not found")
+            };
+
+            let ScopeMember::Var { qualified_name, typ, .. } = scope_member else {
+                todo!("Error: Not a variable")
+            };
+            let typ = typ.clone();
+
+            let var_c_name = compile_name(qualified_name);
+            let (prelude, c_expr, expr_type) = compile_expr(expr, state)?;
+
+            if expr_type != typ {
+                todo!("Error: Type mismatch")
+            }
+
+            let prelude = prelude.extend_pipe_one(var_c_name.var().assign(c_expr));
+
+            Ok(prelude)
+        }
     }
 }
 
