@@ -1,10 +1,10 @@
-use std::fmt::{self, Formatter, Display};
+use std::fmt::{self, Display, Formatter};
 use std::rc::Rc;
 
 use crate::ast::QualifiedName;
 use crate::error::Report;
 use crate::name::Name;
-use crate::range::Range;
+use nessie_lex::range::Range;
 
 use super::{ScopeMember, Type};
 
@@ -23,13 +23,38 @@ pub enum Error {
         was: Rc<Type>,
         range: Range,
     },
+    AssignTypeMismatch {
+        var_name: QualifiedName,
+        expected: Rc<Type>,
+        got: Rc<Type>,
+        range: Range,
+    },
+    WrongAmountOfFieldsInNewPattern {
+        new_type: Rc<Type>,
+        type_has: usize,
+        pattern_has: usize,
+        range: Range,
+    },
+    IndexNonArrayType {
+        was: Rc<Type>,
+        range: Range,
+    },
+    IndexIsNotInt {
+        was: Rc<Type>,
+        range: Range,
+    },
+    PlusTypesNotEqual {
+        left: Rc<Type>,
+        right: Rc<Type>,
+        range: Range,
+    },
 }
 
 impl From<Error> for Report {
     fn from(error: Error) -> Self {
         match error {
             Error::UnknownName(name, range) => Report {
-                message: format!("The name '{name:?}' is not defined in the current scope"),
+                message: format!("The name '{name}' is not defined in the current scope"),
                 range,
                 hint: None, // TODO: Suggest closest name.
             },
@@ -67,7 +92,52 @@ impl From<Error> for Report {
             Error::IfConditionMustReturnBool { was, range } => Report {
                 message: "This if condition did not return bool".to_string(),
                 range,
-                hint: Some(format!("It returned '{:?}'", was)),
+                hint: Some(format!("It returned '{was}'")),
+            },
+            Error::AssignTypeMismatch { var_name, expected, got, range } => Report {
+                message: "Tried to assign a value of the wrong type to a variable".to_string(),
+                range,
+                hint: Some(
+                    format!(
+                        "The variable '{var_name}' is of type '{expected}' but you tried to assign a value of type '{got}'",
+                    ),
+                ),
+            },
+            Error::WrongAmountOfFieldsInNewPattern { new_type, type_has, pattern_has, range } => Report {
+                message: "Wrong amount of fields the right".into(),
+                range,
+                hint: Some(
+                    format!(
+                        "The type '{new_type}' has {type_has} fields but the pattern has {pattern_has} fields",
+                    ),
+                ),
+            },
+            Error::IndexNonArrayType { was, range } => Report {
+                message: "Tried to index a non-array value".into(),
+                range,
+                hint: Some(
+                    format!(
+                        "The value '{was}' is not an array",
+                    ),
+                ),
+            },
+            Error::IndexIsNotInt { was, range } => Report {
+                message: "Tried to index with a non-i32 value".into(),
+                range,
+                hint: Some(
+                    format!(
+                        "The value '{was}' is not an i32",
+                    ),
+                ),
+            },
+            Error::PlusTypesNotEqual { left, right, range } => Report {
+                message: "Tried to add two values of different types".into(),
+                range,
+                hint: Some(
+                    format!(
+                        "The left value is of type '{left}' but the right value is of type '{right}'",
+                    ),
+                ),
             },
         }
     }
@@ -86,4 +156,3 @@ impl<'a> Display for DisplayTypes<'a> {
         write!(f, "{}", types)
     }
 }
-

@@ -1,81 +1,72 @@
-mod macros;
+use nessie_lex::range::Located;
+use nessie_lex::{Keyword, Symbol};
 
-use crate::range::Located;
-use self::macros::define_plain_enum;
-
-
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum Token<'source> {
-    Ident(&'source str),
-    Keyword(Keyword),
-    Symbol(Symbol),
-    NewLine(NewLine),
-    String(Quote, &'source str),
-    Int(i32),            
-    InvalidChar(char),
-    UnteminatedString,
-}
+pub type Token<'a> = nessie_lex::Token<'a, Keyword, Symbol>;
 
 pub type LToken<'source> = Located<Token<'source>>;
 
-define_plain_enum! { pub enum Keyword {
-    Fn "fn",
-    If "if",
-    Else "else",
-    For "for",
-    In "in",
-    Do "do",
-    Import "import",
-    Type "type",
-    Match "match",
-    New "new"
-} }
-
-define_plain_enum! { pub enum Symbol {
-    FatArrow "=>",
-    Arrow "->",
-    Equal "=",
-    ColonEqual ":=",
-    DoubleColon "::",
-    Colon ":",
-    DotDot "..",
-    Dot ".",
-    Comma ",",
-    Unit "()",
-    OpenParen "(",
-    CloseParen ")",
-    OpenSquare "[",
-    CloseSquare "]",
-    OpenCurly "{",
-    CloseCurly "}"
-} }
-
-define_plain_enum! { pub enum Quote {
-    Single "'",
-    Double "\""
-} }
-
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum NewLine {
-    NewLine { indent: usize },
-    EmptyLine,
+#[derive(Keyword, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keyword {
+    #[string("fn")]
+    Fn,
+    #[string("if")]
+    If,
+    #[string("else")]
+    Else,
+    #[string("for")]
+    For,
+    #[string("while")]
+    While,
+    #[string("in")]
+    In,
+    #[string("do")]
+    Do,
+    #[string("import")]
+    Import,
+    #[string("type")]
+    Type,
+    #[string("match")]
+    Match,
+    #[string("new")]
+    New,
+    #[string("with")]
+    With,
 }
 
-impl<'a> From<NewLine> for Token<'a> {
-    fn from(value: NewLine) -> Self {
-        Self::NewLine(value)
-    }
+#[derive(Symbol, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Symbol {
+    #[string("=>")]
+    FatArrow,
+    #[string("->")]
+    Arrow,
+    #[string(":=")]
+    ColonEqual,
+    #[string("::")]
+    ColonColon,
+    #[string("()")]
+    Unit,
+    #[string("..")]
+    DotDot,
+    #[string("=")]
+    Equal,
+    #[string(":")]
+    Colon,
+    #[string(".")]
+    Dot,
+    #[string(",")]
+    Comma,
+    #[string("+")]
+    Plus,
+    #[string("(")]
+    OpenParen,
+    #[string(")")]
+    CloseParen,
+    #[string("[")]
+    OpenSquare,
+    #[string("]")]
+    CloseSquare,
+    #[string("{")]
+    OpenCurly,
+    #[string("}")]
+    CloseCurly,
 }
-
-impl<'a> From<Keyword> for Token<'a> {
-    fn from(value: Keyword) -> Self {
-        Self::Keyword(value)
-    }
-}
-
-impl<'a> From<Symbol> for Token<'a> {
-    fn from(value: Symbol) -> Self {
-        Self::Symbol(value)
-    }
-}
-

@@ -87,7 +87,7 @@ impl Eq for Name {}
 
 impl PartialOrd for Name {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.as_ref().partial_cmp(other)
+        Some(self.cmp(other))
     }
 }
 

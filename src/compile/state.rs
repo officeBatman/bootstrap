@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::QualifiedName;
+use crate::ast::{self, QualifiedName};
 use crate::global::ExtendPipe;
 use crate::name::Name;
 
@@ -13,6 +13,8 @@ pub struct State {
     pub scope: Vec<ScopeMember>,
     pub errors: Vec<Error>,
     pub array_types: HashMap<Rc<Type>, Array>,
+    pub functions: Vec<Function>,
+    pub new_types: Vec<NewType>,
     pub name_counter: usize,
 }
 
@@ -20,6 +22,21 @@ pub struct State {
 pub struct Array {
     pub type_name: Name,
     pub make_name: Name,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub name: Name,
+    pub params: Vec<(Name, Rc<Type>)>,  
+    pub return_type: Rc<Type>,
+    pub body: Vec<ast::Statement>,
+    pub return_expr: Option<ast::Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewType {
+    pub name: QualifiedName,
+    pub built_from: Vec<Rc<Type>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +58,7 @@ pub enum ScopeMember {
     NewType {
         name: Name,
         qualified_name: QualifiedName,
-        typ: Rc<Type>,
+        fields: Vec<Rc<Type>>,
     },
 }
 
@@ -58,13 +75,13 @@ impl State {
     pub fn generate_name(&mut self, prefix: &Name) -> QualifiedName {
         let name = vec![prefix.clone(), self.name_counter.to_string().into()];
         self.name_counter += 1;
-        name
+        name.into()
     }
 
     fn make_array(&mut self) -> Array {
         let name = self.generate_name(&"array".into());
         let type_name = compile_name(&name);
-        let make_name = compile_name(&vec!["make".into()].extend_pipe(name));
+        let make_name = compile_name(&vec!["make".into()].extend_pipe(name).into());
         Array {
             type_name,
             make_name,

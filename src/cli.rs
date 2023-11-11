@@ -15,6 +15,8 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Action {
     Compile { file_path: PathBuf },
+    #[clap(about = "A read-compile-print-loop")]
+    Rcpl,
 }
 
 pub fn parse_args() -> Cli {

@@ -46,6 +46,14 @@ pub trait CombExpr1: Into<Box<Expr>> {
         Expr::Binary(BinaryOp::Sub, self.into(), other.into())
     }
 
+    fn and(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::And, self.into(), other.into())
+    }
+
+    fn less_than(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Lt, self.into(), other.into())
+    }
+
     /// Makes a call expression to this function.
     fn call(self, parameters: impl Into<Vec<Expr>>) -> Expr {
         Expr::Call(self.into(), parameters.into())
@@ -143,6 +151,14 @@ pub trait CombName: Into<Name> {
 
     fn literal(self) -> Expr {
         Expr::Str(self.into())
+    }
+
+    fn for_(self, amount: impl Into<Box<Expr>>, body: impl Into<Block>) -> Statement {
+        let var = self.into().var();
+        let start = 0.literal();
+        let cond = var.clone().less_than(amount);
+        let inc = var.inc();
+        Statement::For(start, cond, inc, body.into())
     }
 }
 

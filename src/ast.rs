@@ -1,7 +1,10 @@
-use crate::name::Name;
-use crate::range::Range;
+mod qualified_name;
 
-pub type QualifiedName = Vec<Name>;
+use crate::name::Name;
+use nessie_lex::range::Range;
+
+pub use qualified_name::QualifiedName;
+pub(crate) use qualified_name::qname;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
@@ -10,12 +13,20 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
-    Import(QualifiedName),
+    Import(QualifiedName, Range),
     Expr(Expr),
     VarDecl(Name, Expr),
     For(Name, Expr, Expr, Vec<Statement>),
+    While(Expr, Vec<Statement>),
     If(Expr, Vec<Statement>, Option<Vec<Statement>>),
-    Type(Name, TypeExpr),
+    Type(Name, Vec<TypeExpr>),
+    Function {
+        name: Name,
+        params: Vec<(Name, TypeExpr)>,
+        return_type: TypeExpr,
+        body: Vec<Statement>,
+        return_expr: Option<Expr>,
+    },
     Assign(QualifiedName, Expr),
 }
 
@@ -26,7 +37,10 @@ pub enum Expr {
     Apply { func: Box<Expr>, args: Vec<Expr> },
     New(QualifiedName, Range),
     Array(Vec<Expr>, Range),
+    Index(Box<Expr>, Box<Expr>, Range),
     Match(Box<Expr>, Vec<MatchArm>, Range),
+    Block(Vec<Statement>, Option<Box<Expr>>, Range),
+    Plus(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +67,7 @@ pub struct MatchArm {
 pub enum Pattern {
     Var(Name, Range),
     Literal(Literal, Range),
-    New(QualifiedName, Box<Pattern>, Range),
+    New(QualifiedName, Vec<Pattern>, Range),
 }
 
 impl Expr {
@@ -70,7 +84,10 @@ impl Expr {
             | Expr::Literal(_, range)
             | Expr::Array(_, range)
             | Expr::Match(.., range)
+            | Expr::Block(.., range) 
+            | Expr::Index(.., range)
             | Expr::New(_, range) => *range,
+            Expr::Plus(a, b) => a.range() | b.range(),
         }
     }
 }

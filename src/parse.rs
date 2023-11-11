@@ -2,9 +2,11 @@ mod token_reader;
 
 use crate::ast;
 use crate::error::Report;
+use crate::global::ExtendPipe;
 use crate::name::Name;
-use crate::range::Range;
-use crate::token::{Keyword, LToken, Quote, Symbol, Token};
+use nessie_lex::range::Range;
+use nessie_lex::Quote;
+use crate::token::{Keyword, LToken, Symbol, Token};
 use token_reader::TokenReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +28,9 @@ pub enum Error {
     // TODO: Change this to be more descriptive
     TooManyTokensAfterType(Range),
     NoEqualAfterTypeName(Range),
+    NoInAfterForName(Range),
+    IndexBracketsNotClosed(Range),
+    IndexBracketsNotOpened(Range),
 }
 
 impl From<Error> for Report {
@@ -115,8 +120,34 @@ impl From<Error> for Report {
                 range,
                 hint: Some("Type definitions are of the form 'type <name> = <type>'".to_string()),
             },
-            Error::NoEqualAfterTypeName(_) => todo!(),
-            Error::TooManyTokensAfterType(_) => todo!(),
+            Error::NoEqualAfterTypeName(range) => Report {
+                message: "No '=' found after type name".to_string(),
+                range,
+                hint: Some("Type definitions are of the form 'type <name> = <type>'".to_string()),
+            },
+            Error::TooManyTokensAfterType(range) => Report {
+                message: "Too many tokens after type definition".to_string(),
+                range,
+                hint: Some("Type definitions are of the form 'type <name> = <type>'".to_string()),
+            },
+            Error::NoInAfterForName(range) => Report {
+                message: "No 'in' keyword found after for loop variable name".to_string(),
+                range,
+                hint: Some(
+                    "For loops are of the form 'for <name> in <start> .. <end> do { .. }'"
+                        .to_string(),
+                ),
+            },
+            Error::IndexBracketsNotClosed(range) => Report {
+                message: "Index brackets not closed".to_string(),
+                range,
+                hint: Some("Indexing is of the form '<expr>.[<expr>]".to_string()),
+            },
+            Error::IndexBracketsNotOpened(range) => Report {
+                message: "Index brackets not opened".to_string(),
+                range,
+                hint: Some("Indexing is of the form '<expr>.[<expr>]".to_string()),
+            },
         }
     }
 }
@@ -178,12 +209,20 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
         return parse_for(state);
     }
 
+    if state.pop_token_eq(Keyword::While) {
+        return parse_while(state);
+    }
+
     if state.pop_token_eq(Keyword::Type) {
         return parse_type_definition(state);
     }
 
     if state.pop_token_eq(Keyword::If) {
         return parse_if(state);
+    }
+
+    if state.pop_token_eq(Keyword::Fn) {
+        return parse_fn(state);
     }
 
     let expr = parse_expr(state);
@@ -251,6 +290,21 @@ fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
         return parse_match(state);
     }
 
+    parse_plus_expr(state)
+}
+
+fn parse_plus_expr(state: &mut State) -> Result<ast::Expr, ()> {
+    let mut expr = parse_application_expr(state)?;
+
+    while state.pop_token_eq(Symbol::Plus) {
+        let rhs = parse_application_expr(state)?;
+        expr = ast::Expr::Plus(Box::new(expr), Box::new(rhs));
+    }
+
+    Ok(expr)
+}
+
+fn parse_application_expr(state: &mut State) -> Result<ast::Expr, ()> {
     let Some(first) = parse_atom(state)? else {
         state.errors.push(Error::ExpectedExpression(state.curr_range()));
         return Err(());
@@ -258,12 +312,10 @@ fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
 
     let mut args = vec![];
     loop {
-        let arg = parse_atom(state);
-        args.push(match arg {
-            Ok(Some(arg)) => Ok(arg),
-            Ok(None) => break,
-            Err(()) => Err(()),
-        });
+        match parse_atom(state).transpose() {
+            None => break,
+            Some(arg) => args.push(arg),
+        }
     }
 
     if args.is_empty() {
@@ -277,6 +329,37 @@ fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
 }
 
 fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
+    let start = state.curr_range();
+
+    let Some(mut atom) = parse_atom_before_postfix(state)? else {
+        return Ok(None);
+    };
+    
+    while state.pop_token_eq(Symbol::Dot) {
+        if !state.pop_token_eq(Symbol::OpenSquare) {
+            return state.error(Error::IndexBracketsNotOpened(start | state.prev_range()));
+        }
+
+        let Ok(index_expr) = parse_expr(state) else {
+            skip_until(state, Symbol::CloseSquare);
+            continue;
+        };
+
+        if !state.pop_token_eq(Symbol::CloseSquare) {
+            return state.error(Error::IndexBracketsNotClosed(start | state.prev_range()));
+        }
+
+        atom = ast::Expr::Index(
+            Box::new(atom),
+            Box::new(index_expr),
+            start | state.prev_range(),
+        );
+    }
+
+    Ok(Some(atom))
+}
+
+fn parse_atom_before_postfix(state: &mut State) -> Result<Option<ast::Expr>, ()> {
     let start = state.curr_range();
 
     if let Some(literal) = parse_literal(state)? {
@@ -295,6 +378,18 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
             todo!()
         }
         return Ok(Some(expr));
+    }
+
+    if let Some(mut block) = parse_block(state)? {
+        let last_statement = block.pop();
+        let (body, return_expr) = match last_statement {
+            Some(ast::Statement::Expr(expr)) => (block, Some(Box::new(expr))),
+            Some(statement) => (block.extend_pipe_one(statement), None),
+            None => (block, None),
+        };
+
+        let range = start | state.prev_range();
+        return Ok(Some(ast::Expr::Block(body, return_expr, range)));
     }
 
     if state.pop_token_eq(Keyword::New) {
@@ -355,11 +450,16 @@ fn parse_type_definition(state: &mut State) -> Result<ast::Statement, ()> {
         return Err(());
     }
 
-    let Some(equal_to) = parse_type_expr(state)? else {
-        todo!()
-    };
+    let mut args = Vec::new();
+    loop {
+        match parse_type_expr(state) {
+            Ok(Some(equal_to)) => args.push(equal_to),
+            Ok(None) => break,
+            Err(()) => return Err(()),
+        }
+    }
 
-    Ok(ast::Statement::Type(Name::from_str(name), equal_to))
+    Ok(ast::Statement::Type(Name::from_str(name), args))
 }
 
 fn parse_import(state: &mut State) -> Result<ast::Statement, ()> {
@@ -369,7 +469,8 @@ fn parse_import(state: &mut State) -> Result<ast::Statement, ()> {
         return Err(());
     };
 
-    Ok(ast::Statement::Import(name))
+    let range = name_start | state.prev_range();
+    Ok(ast::Statement::Import(name, range))
 }
 
 fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
@@ -379,7 +480,7 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
     skip_until(state, Keyword::In);
     let name_end_range = state.prev_range();
     if !state.pop_token_eq(Keyword::In) {
-        todo!()
+        return state.error(Error::NoInAfterForName(name_start_range | name_end_range));
     }
 
     let start_expr = parse_expr(state)?;
@@ -418,6 +519,27 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
     ))
 }
 
+fn parse_while(state: &mut State) -> Result<ast::Statement, ()> {
+    let expr = parse_expr(state)?;
+
+    if !state.pop_token_eq(Keyword::Do) {
+        todo!()
+    }
+
+    // Allow starting the brace on a new line.
+    let indent = state.indent();
+    state.pop_indent_same(indent);
+
+    // TODO: Allow this to be a statement.
+    let body = parse_block(state);
+
+    let Some(body) = body? else {
+        todo!();
+    };
+
+    Ok(ast::Statement::While(expr, body))
+}
+
 fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
     let condition = parse_expr(state);
     let range_after_expr = state.curr_range();
@@ -452,11 +574,7 @@ fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
             todo!()
         };
 
-        return Ok(ast::Statement::If(
-            condition?,
-            block?,
-            Some(else_block?),
-        ));
+        return Ok(ast::Statement::If(condition?, block?, Some(else_block?)));
     }
 
     let Some(block) = block? else {
@@ -464,6 +582,96 @@ fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
     };
 
     Ok(ast::Statement::If(condition?, block, None))
+}
+
+fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
+    let Some(name) = state.pop_token_ident() else {
+        todo!()
+    };
+
+    if !state.pop_token_eq(Symbol::OpenParen) {
+        todo!()
+    }
+
+    let mut params = Vec::new();
+    loop {
+        if let Ok((param_name, param_type)) = parse_param(state) {
+            if let Ok(param_type) = param_type {
+                params.push((param_name, param_type));
+            } else {
+                todo!()
+            }
+        } else {
+            todo!()
+        }
+        // TODO: Skip until comma or close paren, and report error if something
+        // was skipped.
+
+        if state.pop_token_eq(Symbol::CloseParen) {
+            break;
+        }
+
+        if !state.pop_token_eq(Symbol::Comma) {
+            todo!()
+        }
+    }
+
+    if !state.pop_token_eq(Symbol::Colon) {
+        todo!()
+    }
+
+    let return_type = parse_type_expr(state)?;
+
+    let Some(return_type) = return_type else {
+        todo!()
+    };
+
+    let Ok(block) = parse_block(state) else {
+        todo!()
+    };
+
+    let Some(mut block) = block else {
+        todo!()
+    };
+
+    let last_statement = block.pop();
+    let (body, return_expr) = match last_statement {
+        Some(ast::Statement::Expr(expr)) => (block, Some(expr)),
+        Some(statement) => (block.extend_pipe_one(statement), None),
+        None => (block, None),
+    };
+
+    Ok(ast::Statement::Function {
+        name: Name::from_str(name),
+        params,
+        body,
+        return_expr,
+        return_type,
+    })
+}
+
+/// This returns a nested result in case the name is found and the type is not.
+/// This is useful for error reporting and allows us to define a varaible without
+/// a type to not report this variable as missing.
+fn parse_param(state: &mut State) -> Result<(Name, Result<ast::TypeExpr, ()>), ()> {
+    let Some(name) = state.pop_token_ident() else {
+        todo!()
+    };
+    let name = Name::from_str(name);
+
+    if state.pop_token_eq(Symbol::Colon) {
+        let Ok(param_type) = parse_type_expr(state) else {
+            return Ok((name, Err(())));
+        };
+
+        let Some(param_type) = param_type else {
+            todo!()
+        };
+
+        Ok((name, Ok(param_type)))
+    } else {
+        Ok((name, Err(())))
+    }
 }
 
 fn parse_array(state: &mut State) -> Result<ast::Expr, ()> {
@@ -513,6 +721,10 @@ fn parse_match(state: &mut State) -> Result<ast::Expr, ()> {
 
     let inp = parse_expr(state)?;
 
+    if !state.pop_token_eq(Keyword::With) {
+        todo!()
+    }
+
     if !state.pop_token_eq(Symbol::OpenCurly) {
         todo!()
     }
@@ -544,7 +756,10 @@ fn parse_match(state: &mut State) -> Result<ast::Expr, ()> {
 }
 
 fn parse_match_arm(state: &mut State) -> Result<ast::MatchArm, ()> {
-    let pattern = parse_pattern(state)?;
+    let Some(pattern) = parse_pattern(state)? else {
+        dbg!(state.curr_token());
+        todo!()
+    };
 
     if !state.pop_token_eq(Symbol::FatArrow) {
         todo!()
@@ -555,13 +770,33 @@ fn parse_match_arm(state: &mut State) -> Result<ast::MatchArm, ()> {
     Ok(ast::MatchArm { pattern, body })
 }
 
-fn parse_pattern(state: &mut State) -> Result<ast::Pattern, ()> {
+fn parse_pattern(state: &mut State) -> Result<Option<ast::Pattern>, ()> {
     if let Some(name) = state.pop_token_ident() {
         let range = state.prev_range();
-        return Ok(ast::Pattern::Var(Name::from_str(name), range));
+        return Ok(Some(ast::Pattern::Var(Name::from_str(name), range)));
     }
 
-    todo!()
+    if state.pop_token_eq(Keyword::New) {
+        let range = state.prev_range();
+
+        let Some(name) = state.pop_token_ident() else {
+            todo!()
+        };
+
+        // TODO: Use `parse_pattern_atom` instead
+        let mut subpatterns = vec![];
+        while let Some(subpattern) = parse_pattern(state)? {
+            subpatterns.push(subpattern);
+        }
+
+        return Ok(Some(ast::Pattern::New(
+            Name::from_str(name).into(),
+            subpatterns,
+            range,
+        )));
+    }
+
+    Ok(None)
 }
 
 fn parse_block(state: &mut State) -> Result<Option<Vec<ast::Statement>>, ()> {
@@ -614,7 +849,7 @@ fn parse_qualified_name(state: &mut State) -> Result<Option<ast::QualifiedName>,
     };
 
     let mut ret = vec![Name::from_str(first)];
-    while state.pop_token_eq(Symbol::DoubleColon) {
+    while state.pop_token_eq(Symbol::ColonColon) {
         let Some(next) = state.pop_token_ident() else {
             state.errors.push(Error::NoIdentifierAfterDoubleColon(state.curr_range()));
             return Err(());
@@ -622,7 +857,7 @@ fn parse_qualified_name(state: &mut State) -> Result<Option<ast::QualifiedName>,
         ret.push(Name::from_str(next));
     }
 
-    Ok(Some(ret))
+    Ok(Some(ret.into()))
 }
 
 fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
@@ -659,7 +894,7 @@ fn skip_newlines(state: &mut State) -> bool {
 }
 
 fn skip_until_indent(indent: usize, state: &mut State) {
-    use crate::token::NewLine as L;
+    use nessie_lex::NewLine as L;
     while let Some(curr) = state.curr_token() {
         if curr == Token::NewLine(L::NewLine { indent }) {
             break;
@@ -722,5 +957,12 @@ impl<'a> std::ops::Deref for State<'a> {
 impl<'a> std::ops::DerefMut for State<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.tokens
+    }
+}
+
+impl State<'_> {
+    pub fn error<T>(&mut self, error: Error) -> Result<T, ()> {
+        self.errors.push(error);
+        Err(())
     }
 }

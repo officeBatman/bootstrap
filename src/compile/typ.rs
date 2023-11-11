@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::ast::QualifiedName;
+use crate::{ast::QualifiedName};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {

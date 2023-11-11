@@ -36,7 +36,6 @@ pub enum Include {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopLevelDeclaration {
     Function(Function),
-    #[allow(dead_code)]
     Struct(Name, Option<Vec<(PTypeExpr, Name)>>),
 }
 

@@ -1,4 +1,5 @@
-use crate::{range::{Range, Pos}, global::ExtendPipe};
+use crate::global::ExtendPipe;
+use nessie_lex::range::{Pos, Range};
 use std::fmt::{self, Display, Formatter};
 
 pub struct Report {

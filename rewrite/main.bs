@@ -1,0 +1,92 @@
+import std::char::is_whitespace
+import std::io::print
+import std::io::println
+import std::io::input
+import std::io::read
+
+type token = str str
+
+type str2 = str str
+
+fn is_letter(ch: char): bool {
+    i = std::char::to_i32 ch
+    a = std::char::to_i32 'a'
+    z = std::char::to_i32 'z'
+    A = std::char::to_i32 'A'
+    Z = std::char::to_i32 'Z'
+    is_lower = and (lte a i) (lte i z)
+    is_upper = and (lte A i) (lte i Z)
+    is_underscore = std::char::eq ch '_'
+    or (or is_lower is_upper) is_underscore
+}
+
+fn is_symbol(ch: char): bool {
+    not (or (is_letter ch) (is_whitespace ch))
+}
+
+fn first_char_is_letter(string: str): bool {
+    and (gt (std::str::len string) 0) (is_letter (std::str::get string 0))
+}
+
+fn first_char_is_symbol(string: str): bool {
+    and (gt (std::str::len string) 0) (is_symbol (std::str::get string 0))
+}
+
+fn get_first_token(string: str): str2 {
+    // Get rid of spaces, and keep the length
+    string := std::str::strip string
+    len = std::str::len string
+    ret = ""
+
+    if gt (std::str::len string) 0 do {
+        ch = std::str::get string 0
+        if is_symbol ch do {
+            // Parse symbol token.
+            while first_char_is_symbol string do {
+                ch = std::str::get string 0
+                ch_str = std::str::from_char ch
+                ret := std::str::concat ret ch_str
+                string := std::str::substr string 1 len
+            }
+        } else {
+            // Parse word token.
+            while first_char_is_letter string do {
+                ch = std::str::get string 0
+                ch_str = std::str::from_char ch
+                ret := std::str::concat ret ch_str
+                string := std::str::substr string 1 len
+            }
+        }
+    }
+
+    new str2 ret string
+}
+
+
+file_name = "rewrite/main.bs"
+text = std::str::strip (read file_name)
+lines = std::str::split_lines text
+
+tokens = [""]
+for i in 0 .. std::arr::len lines do {
+    line = std::str::strip (std::arr::get lines i)
+    
+    while gt (std::str::len line) 0 do {
+        match get_first_token line with {
+            new str2 token rest => {
+                line := rest
+                print "next token is: "
+                println token
+                tokens := tokens + [token]
+            }
+        }
+    }
+}
+
+j = 0
+while std::str::eq tokens.[0] "" do {
+    j := j + 1
+}
+if std::str::eq tokens.[0] "import" do {
+    println "Found import!"
+}

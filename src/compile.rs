@@ -1,19 +1,20 @@
+use std::mem::take;
 use std::rc::Rc;
 
 use crate::{
-    ast::{Expr, Literal, MatchArm, Pattern, Program, QualifiedName, Statement, TypeExpr},
+    ast::{qname, Expr, Literal, MatchArm, Pattern, Program, QualifiedName, Statement, TypeExpr},
     c::{self, combine_traits::*},
     global::{with_variable, with_variables, ExtendPipe, Withable},
     name::Name,
-    range::Range,
 };
+use nessie_lex::range::Range;
 
 mod error;
 mod state;
 mod typ;
 
 pub use error::Error;
-pub use state::{Array, ScopeMember, State};
+pub use state::{Array, Function, NewType, ScopeMember, State};
 pub use typ::Type;
 
 pub fn compile(
@@ -25,13 +26,15 @@ pub fn compile(
         errors: vec![],
         name_counter: 0,
         array_types: [(
-            Type::Named(vec!["str".into()]).into(),
+            Type::Named(qname![str]).into(),
             Array {
-                type_name: "bootstrap_array_str".into(),
-                make_name: "bootstrap_make_array_str".into(),
+                type_name: "array_str".into(),
+                make_name: "make_array_str".into(),
             },
         )]
         .into(),
+        functions: vec![],
+        new_types: vec![],
     };
     let array_types_originals = state
         .array_types
@@ -60,6 +63,14 @@ pub fn compile(
 
     let mut error = false;
     let mut declarations = vec![c::TopLevelDeclaration::Function(entry_point)];
+
+    // Declare new types!
+    for new_type in state.new_types.clone() {
+        let decl = compile_new_type(&new_type, &mut state);
+        declarations.extend(decl);
+    }
+
+    // Declare array types.
     for element_type in state.array_types.keys().cloned().collect::<Vec<_>>() {
         // Hack: Skip the `str` type, which is a special case.
         if array_types_originals.contains(&element_type) {
@@ -72,14 +83,131 @@ pub fn compile(
         declarations.extend(array_declarations);
     }
 
+    // Declare functions!
+    for function in take(&mut state.functions) {
+        let Ok(function_declaration) = compile_function(function, &mut state) else {
+            error = true;
+            continue;
+        };
+        declarations.push(function_declaration);
+    }
+
     if error {
         return Err(state.errors);
     }
+
+    declarations = sort_declarations(declarations);
 
     Ok(c::Program {
         includes: vec![c::Include::Quote("bootstrap.h".into())],
         declarations,
     })
+}
+
+fn sort_declarations(mut declarations: Vec<c::TopLevelDeclaration>) -> Vec<c::TopLevelDeclaration> {
+    // Rank declarations to sort them. The rank of each declaration will be
+    // +1 of the maximum rank that should come before it.
+    let mut ranks: Vec<Vec<usize>> = vec![(0..declarations.len()).collect()];
+
+    let mut rank = 0;
+
+    while !ranks[rank].is_empty() {
+        dbg!(&ranks);
+        ranks.push(vec![]); // Create the next rank.
+        for i in 0..ranks[rank].len() {
+            let decl = &declarations[ranks[rank][i]];
+            for j in 0..ranks[rank].len() {
+                if i == j {
+                    continue;
+                }
+
+                let other_index = ranks[rank][j];
+                let other = &declarations[other_index];
+
+                if should_declaration_come_before(other, decl) {
+                    // Push other to the next rank.
+                    ranks[rank + 1].push(other_index);
+                }
+            }
+        }
+        // Remove the moved items from this rank.
+        let (rank_vec, next_rank_vec) = {
+            let mut v = ranks.iter_mut().skip(rank).take(2).collect::<Vec<_>>();
+            (v.remove(0), v.remove(0))
+        };
+        rank_vec.retain(|decl| !next_rank_vec.contains(decl));
+        rank += 1;
+    }
+
+    // Flatten the ranks.
+    let dummy_value = c::TopLevelDeclaration::Struct("".into(), None);
+    let take = |decl: usize| {
+        let mut dummy_value = dummy_value.clone();
+        std::mem::swap(&mut declarations[decl], &mut dummy_value);
+        dummy_value
+    };
+    ranks.into_iter().flatten().map(take).collect()
+}
+
+fn should_declaration_come_before(
+    first: &c::TopLevelDeclaration,
+    other: &c::TopLevelDeclaration,
+) -> bool {
+    let c::TopLevelDeclaration::Struct(name1, Some(fields1)) = first else {
+        return false;
+    };
+    let c::TopLevelDeclaration::Struct(name2, Some(fields2)) = other else {
+        return false;
+    };
+
+    let _1_contains_2 = fields1
+        .iter()
+        .any(|(typ, _)| typ.as_ref() == &c::TypeExpr::Var(name2.clone()));
+    _1_contains_2
+}
+
+fn compile_new_type(
+    NewType { name, built_from }: &NewType,
+    state: &mut State,
+) -> Vec<c::TopLevelDeclaration> {
+    let make_name = qname!(make::{name});
+
+    let fields = built_from
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (compile_type(t, state), new_type_field_name(i)))
+        .collect::<Vec<_>>();
+    let c_name = compile_name(name);
+    let make_c_name = compile_name(&make_name);
+
+    let set_fields = fields
+        .iter()
+        .map(|(_, field_name)| {
+            "out"
+                .var()
+                .dot(field_name.clone())
+                .assign(field_name.clone().var())
+        })
+        .collect::<Vec<_>>();
+
+    let struct_decl = c::TopLevelDeclaration::Struct(c_name.clone(), Some(fields.clone()));
+    let make_decl = c::TopLevelDeclaration::Function(c::Function {
+        return_type: c_name.clone().type_var().into(),
+        name: make_c_name,
+        parameters: fields,
+        body: Some(
+            vec![c_name.type_var().declare("out", None)]
+                .extend_pipe(set_fields)
+                .extend_pipe_one("out".var().ret()),
+        ),
+    });
+
+    vec![struct_decl, make_decl]
+}
+
+fn new_type_field_name(i: usize) -> Name {
+    // TODO: Intern these names.
+    format!("_{}", i).into()
 }
 
 fn compile_array(
@@ -138,6 +266,43 @@ fn compile_array(
     Ok(vec![array_struct, array_make])
 }
 
+fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevelDeclaration, ()> {
+    let return_c_type = compile_type(&function.return_type, state);
+    let parameters = function
+        .params
+        .iter()
+        .map(|(name, ty)| (compile_type(ty, state), compile_name(&name.clone().into())))
+        .collect::<Vec<_>>();
+
+    let original_scope_len = state.scope.len();
+
+    for (name, typ) in &function.params {
+        state.scope.push(ScopeMember::Var {
+            qualified_name: name.clone().into(),
+            name: name.clone(),
+            typ: typ.clone(),
+        });
+    }
+
+    let mut body = compile_block(&function.body, state)?;
+    if let Some(ret_expr) = function.return_expr {
+        let (prelude, c_expr, typ) = compile_expr(&ret_expr, state)?;
+        // TODO: check that typ == function.return_type
+        body.extend(prelude);
+        body.push(c::Statement::Return(c_expr));
+    }
+
+    state.scope.truncate(original_scope_len);
+
+    let c_function = c::Function {
+        return_type: return_c_type,
+        name: compile_name(&function.name.clone().into()),
+        parameters,
+        body: Some(body),
+    };
+    Ok(c::TopLevelDeclaration::Function(c_function))
+}
+
 fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
     let mut ret = Ok(vec![]);
     for stmt in statements {
@@ -152,9 +317,9 @@ fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block
 
 fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
     match statement {
-        Statement::Import(name) => {
+        Statement::Import(name, range) => {
             let Some(member) = find_in_scope_nested(&state.scope, name) else {
-                todo!()
+                return state.error(Error::UnknownName(name.clone(), *range));
             };
 
             state.scope.push(member.clone());
@@ -172,7 +337,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
 
             let c_type = compile_type(&type_, state);
 
-            let qualified_name = vec![name.clone()];
+            let qualified_name = QualifiedName::singleton(name.clone());
             let c_name = compile_name(&qualified_name);
             c_block.push(c_expr.variable(c_name, c_type));
 
@@ -188,10 +353,10 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             // Compile the bounds and the body.
             let start_expr = compile_expr(start_expr, state);
             let end_expr = compile_expr(end_expr, state);
-            let i32_type: Rc<_> = Type::Named(vec!["i32".into()]).into();
+            let i32_type: Rc<_> = Type::Named(qname!(i32)).into();
             let var = ScopeMember::Var {
                 name: iteration_var_name.clone(),
-                qualified_name: vec![iteration_var_name.clone()],
+                qualified_name: iteration_var_name.clone().into(),
                 typ: i32_type.clone(),
             };
             let body_block =
@@ -206,7 +371,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let c_start_type = compile_type(&start_type, state);
             // let c_end_type = compile_type(&end_type);
 
-            let c_iter_var_name = compile_name(&vec![iteration_var_name.clone()]);
+            let c_iter_var_name = compile_name(&iteration_var_name.clone().into());
 
             // TODO: Check bound types
             if [start_type, end_type].iter().any(|t| t != &i32_type) {
@@ -233,6 +398,16 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 .extend_pipe_one(c_init_var)
                 .extend_pipe_one(c_for))
         }
+        Statement::While(cond, body) => {
+            // Visit all the subexpressions.
+            let c_cond = compile_expr(cond, state);
+            let c_body = compile_block(body, state);
+            let (cond_c_prelude, cond_c_expr, cond_type) = c_cond?;
+
+            // TODO: Check that cond_type is bool.
+
+            Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, c_body?)))
+        }
         Statement::If(cond, true_body, false_body) => {
             // Visit all the subexpressions.
             let c_cond = compile_expr(cond, state);
@@ -243,7 +418,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let c_true_body = c_true_body?;
             let c_false_body = c_false_body.transpose()?;
             // TODO: Check cond type
-            let bool_type = Rc::new(Type::Named(vec!["bool".into()]));
+            let bool_type = Rc::new(Type::Named(qname![bool]));
             if c_cond_type != bool_type {
                 dbg!(&c_cond_type);
                 state.errors.push(Error::IfConditionMustReturnBool {
@@ -258,12 +433,26 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 c_false_body,
             )))
         }
-        Statement::Type(name, type_expr) => {
-            let typ = eval_type_expr(type_expr, state)?;
+        Statement::Type(name, type_exprs) => {
+            // TODO: Push the name even if there were errors.
+            let member_index = state.scope.len();
             state.scope.push(ScopeMember::NewType {
                 name: name.clone(),
-                qualified_name: vec![name.clone()],
-                typ,
+                qualified_name: name.clone().into(),
+                fields: vec![], // TODO: This is wrong.
+            });
+            let types = type_exprs
+                .iter()
+                .map(|type_expr| eval_type_expr(type_expr, state))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let ScopeMember::NewType { fields, .. } = &mut state.scope[member_index] else {
+                unreachable!()
+            };
+            *fields = types.clone();
+            state.new_types.push(state::NewType {
+                name: name.clone().into(),
+                built_from: types,
             });
             Ok(c::Block::new())
         }
@@ -272,21 +461,75 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 todo!("Error: Variable not found")
             };
 
-            let ScopeMember::Var { qualified_name, typ, .. } = scope_member else {
+            let ScopeMember::Var {
+                qualified_name,
+                typ,
+                ..
+            } = scope_member
+            else {
                 todo!("Error: Not a variable")
             };
             let typ = typ.clone();
+            let qualified_name = qualified_name.clone();
 
-            let var_c_name = compile_name(qualified_name);
+            let var_c_name = compile_name(&qualified_name);
             let (prelude, c_expr, expr_type) = compile_expr(expr, state)?;
 
             if expr_type != typ {
-                todo!("Error: Type mismatch")
+                state.error_and_continue(Error::AssignTypeMismatch {
+                    var_name: qualified_name,
+                    expected: typ.clone(),
+                    got: expr_type,
+                    range: expr.range(),
+                });
             }
 
-            let prelude = prelude.extend_pipe_one(var_c_name.var().assign(c_expr));
+            let prelude = match typ.as_ref() {
+                Type::Unit => prelude.extend_pipe_one(c_expr.stmt()),
+                _ => prelude.extend_pipe_one(var_c_name.var().assign(c_expr)),
+            };
 
             Ok(prelude)
+        }
+        Statement::Function {
+            name,
+            params,
+            return_type,
+            body,
+            return_expr,
+        } => {
+            let return_type = eval_type_expr(return_type, state);
+            let params = params
+                .iter()
+                .map(|(name, type_expr)| {
+                    let typ = eval_type_expr(type_expr, state)?;
+                    Ok((name.clone(), typ))
+                })
+                .collect::<Result<Vec<_>, ()>>();
+
+            let params = params?;
+            let return_type = return_type?;
+
+            let param_types = params
+                .iter()
+                .map(|(_, typ)| typ.clone())
+                .collect::<Vec<_>>();
+
+            state.functions.push(Function {
+                name: name.clone(),
+                params,
+                return_type: return_type.clone(),
+                body: body.clone(),
+                return_expr: return_expr.clone(),
+            });
+
+            state.scope.push(ScopeMember::Var {
+                name: name.clone(),
+                qualified_name: name.clone().into(),
+                typ: Type::Func(param_types, return_type).into(),
+            });
+
+            Ok(vec![])
         }
     }
 }
@@ -299,7 +542,12 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                 return state.error(Error::UnknownName(name.clone(), *range));
             };
 
-            let ScopeMember::Var { typ, qualified_name, .. } = member else {
+            let ScopeMember::Var {
+                typ,
+                qualified_name,
+                ..
+            } = member
+            else {
                 todo!()
             };
 
@@ -346,16 +594,21 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                 todo!()
             };
 
-            let ScopeMember::NewType { qualified_name, typ, .. } = member else {
+            let ScopeMember::NewType {
+                qualified_name,
+                fields,
+                ..
+            } = member
+            else {
                 todo!()
             };
 
-            let c_name = compile_name(qualified_name);
-            let func_name = format!("make_{}", c_name).into();
+            let make_name = qname!(make::{qualified_name});
+            let make_c_name = compile_name(&make_name);
             let ret_type = Rc::new(Type::Named(qualified_name.clone()));
-            let func_type = Rc::new(Type::Func(vec![typ.clone()], ret_type));
+            let func_type = Rc::new(Type::Func(fields.clone(), ret_type));
 
-            Ok((vec![], c::Expr::Var(func_name), func_type))
+            Ok((vec![], c::Expr::Var(make_c_name), func_type))
         }
         Expr::Array(element_exprs, _) => {
             let mut compiled_element_exprs = element_exprs
@@ -447,9 +700,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                     },
                 );
 
-            let Some(out_type) = out_type else {
-                todo!()
-            };
+            let Some(out_type) = out_type else { todo!() };
 
             let out_c_type = compile_type(&out_type, state);
 
@@ -458,6 +709,65 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
 
             Ok((prelude, c_out_var_name.var(), out_type))
         }
+        Expr::Block(statements, None, _) => {
+            let original_scope_len = state.scope.len();
+
+            let prelude = statements
+                .iter()
+                .map(|statement| compile_statement(statement, state))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            state.scope.truncate(original_scope_len);
+
+            Ok((prelude, 0.literal(), Type::Unit.into()))
+        }
+        Expr::Block(statements, Some(ret), _) => {
+            let original_scope_len = state.scope.len();
+
+            let compiled_statements = statements
+                .iter()
+                .map(|statement| compile_statement(statement, state))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            let (ret_prelude, ret_expr, ret_type) = compile_expr(ret, state)?;
+
+            let prelude = compiled_statements.extend_pipe(ret_prelude);
+
+            state.scope.truncate(original_scope_len);
+
+            Ok((prelude, ret_expr, ret_type))
+        }
+        Expr::Index(array_expr, index_expr, _) => {
+            let array = compile_expr(array_expr, state);
+            let index = compile_expr(index_expr, state);
+
+            let (array_prelude, array_c_expr, array_type) = array?;
+            let (index_prelude, index_c_expr, index_type) = index?;
+
+            if index_type.as_ref() != &Type::Named(qname!(i32)) {
+                return state.error(Error::IndexIsNotInt {
+                    was: index_type,
+                    range: index_expr.range(),
+                });
+            }
+            let Type::Array(element_type) = array_type.as_ref() else {
+                return state.error(Error::IndexNonArrayType {
+                    was: array_type,
+                    range: array_expr.range(),
+                });
+            };
+
+            let prelude = array_prelude.extend_pipe(index_prelude);
+            let expr = array_c_expr.dot("data").index(index_c_expr);
+            Ok((prelude, expr, element_type.clone()))
+        }
+        Expr::Plus(a_expr, b_expr) => compile_plus_expr(a_expr, b_expr, state),
     }
 }
 
@@ -465,7 +775,9 @@ fn eval_type_expr(expr: &TypeExpr, state: &mut State) -> Result<Rc<Type>, ()> {
     match expr {
         TypeExpr::Var(name, range) => {
             let Some(member) = find_in_scope(&state.scope, name) else {
-                state.errors.push(Error::UnknownTypeName(name.clone(), *range));
+                state
+                    .errors
+                    .push(Error::UnknownTypeName(name.clone(), *range));
                 return Err(());
             };
 
@@ -506,7 +818,7 @@ fn compile_type(t: &Type, state: &mut State) -> Rc<c::TypeExpr> {
 
 fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
     fn typ(name: impl Into<Name>) -> Rc<Type> {
-        Rc::new(Type::Named(vec![name.into()]))
+        Rc::new(Type::Named(name.into().into()))
     }
 
     match literal {
@@ -526,6 +838,21 @@ struct CompiledPattern {
     condition: c::Expr,
 }
 
+impl CompiledPattern {
+    pub const EMPTY: CompiledPattern = CompiledPattern {
+        variables: Vec::new(),
+        prelude: Vec::new(),
+        condition: c::Expr::Int(1),
+    };
+
+    pub fn and(mut self, other: CompiledPattern) -> Self {
+        self.variables.extend(other.variables);
+        self.prelude.extend(other.prelude);
+        self.condition = self.condition.and(other.condition);
+        self
+    }
+}
+
 fn compile_pattern(
     pattern: &Pattern,
     inp_expr: &c::Expr,
@@ -534,25 +861,150 @@ fn compile_pattern(
 ) -> Result<CompiledPattern, ()> {
     match pattern {
         Pattern::Var(name, _) => {
-            let c_name = compile_name(&vec![name.clone()]);
+            let c_name = compile_name(&name.clone().into());
             let c_inp_type = compile_type(inp_type, state);
             Ok(CompiledPattern {
                 variables: vec![ScopeMember::Var {
                     name: name.clone(),
-                    qualified_name: vec![name.clone()],
+                    qualified_name: name.clone().into(),
                     typ: inp_type.clone(),
                 }],
                 prelude: vec![inp_expr.clone().variable(c_name, c_inp_type)],
                 condition: 1.literal(),
             })
         }
-        Pattern::New(_, _, _) => todo!(),
+        Pattern::New(qualified_name, field_patterns, _) => {
+            let Some(member) = find_in_scope_nested(&state.scope, qualified_name.parts()) else {
+                todo!()
+            };
+
+            let ScopeMember::NewType {
+                fields: field_types,
+                ..
+            } = member
+            else {
+                todo!()
+            };
+            let fields = field_types.clone();
+
+            if field_patterns.len() != field_types.len() {
+                state.error_and_continue(Error::WrongAmountOfFieldsInNewPattern {
+                    new_type: todo!(),
+                    type_has: field_patterns.len(),
+                    pattern_has: field_types.len(),
+                    range: todo!(),
+                });
+            }
+
+            let compiled_patterns = field_patterns
+                .iter()
+                .zip(fields)
+                .enumerate()
+                .map(|(i, (field_pattern, field_type))| {
+                    compile_pattern(
+                        field_pattern,
+                        &inp_expr.clone().dot(new_type_field_name(i)),
+                        &field_type,
+                        state,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .fold(CompiledPattern::EMPTY, |a, b| a.and(b));
+
+            Ok(compiled_patterns)
+        }
         Pattern::Literal(_, _) => todo!(),
     }
 }
 
+fn compile_plus_expr(
+    a_expr: &Expr,
+    b_expr: &Expr,
+    state: &mut State,
+) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
+    let a = compile_expr(a_expr, state);
+    let b = compile_expr(b_expr, state);
+
+    let (a_prelude, a_c_expr, a_type) = a?;
+    let (b_prelude, b_c_expr, b_type) = b?;
+
+    if a_type != b_type {
+        return state.error(Error::PlusTypesNotEqual {
+            left: a_type,
+            right: b_type,
+            range: a_expr.range() | b_expr.range(),
+        });
+    }
+
+    let mut prelude = a_prelude.extend_pipe(b_prelude);
+    let ret_type = a_type;
+
+    let str_type = Rc::new(Type::Named(qname!(str)));
+    let i32_type = Rc::new(Type::Named(qname!(i32)));
+
+    let i32_c_type = compile_type(&i32_type, state);
+    let expr = {
+        if ret_type == i32_type {
+            a_c_expr.add(b_c_expr)
+        } else if ret_type == str_type {
+            compile_name(&qname!(std::str::concat))
+                .var()
+                .call(vec![a_c_expr, b_c_expr])
+        } else if let Type::Array(element_type) = ret_type.as_ref() {
+            let ret_var = state.generate_name(&"plus_ret".into());
+            let ret_c_var = compile_name(&ret_var);
+            let ret_c_type = compile_type(&ret_type, state);
+            let i_var = state.generate_name(&"i".into());
+            let i_c_var = compile_name(&i_var);
+
+            // C expression for length of return array.
+            let length_c_expr = a_c_expr
+                .clone()
+                .dot("length")
+                .add(b_c_expr.clone().dot("length"));
+
+            // C statement for declaring return array.
+            let declare_array = state
+                .get_array(element_type)
+                .make_name
+                .clone()
+                .var()
+                .call(vec![length_c_expr.clone()])
+                .variable(ret_c_var.clone(), ret_c_type);
+
+            // Array initialization c loop.
+            let declare_i = 0.literal().variable(i_c_var.clone(), i32_c_type);
+            let a_index = a_c_expr.clone().dot("data").index(i_c_var.clone().var());
+            let b_index = b_c_expr.dot("data").index(i_c_var.clone().var());
+            let ret_index = ret_c_var
+                .clone()
+                .var()
+                .dot("data")
+                .index(i_c_var.clone().var());
+            let init_array_1 = i_c_var.clone().for_(
+                a_c_expr.clone().dot("length"),
+                vec![ret_index.clone().assign(a_index)],
+            );
+            let init_array_2 = i_c_var
+                .clone()
+                .for_(length_c_expr, vec![ret_index.assign(b_index)]);
+
+            prelude.extend([declare_array, declare_i, init_array_1, init_array_2]);
+
+            ret_c_var.var()
+        } else {
+            state.error_and_continue(todo!());
+            // Just return something so compliation can continue.
+            a_c_expr.add(b_c_expr)
+        }
+    };
+
+    Ok((prelude, expr, ret_type))
+}
+
 fn compile_name(name: &QualifiedName) -> Name {
-    ("bootstrap_".to_owned() + &name.join("_")).into()
+    name.join("_").into()
 }
 
 fn total_range(ranges: impl IntoIterator<Item = Range>, default: Range) -> Range {
@@ -589,16 +1041,16 @@ mod tests {
 
     #[test]
     fn test_find_in_scope() {
-        let i32_type = Rc::new(Type::Named(vec!["i32".into()]));
+        let i32_type = Rc::new(Type::Named(qname![i32]));
         let scope = vec![
             ScopeMember::Var {
                 name: "a".into(),
-                qualified_name: vec!["std".into(), "a".into()],
+                qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             },
             ScopeMember::Var {
                 name: "b".into(),
-                qualified_name: vec!["b".into()],
+                qualified_name: qname![std::b],
                 typ: i32_type.clone(),
             },
         ];
@@ -606,7 +1058,7 @@ mod tests {
             find_in_scope(&scope, "a"),
             Some(&ScopeMember::Var {
                 name: "a".into(),
-                qualified_name: vec!["std".into(), "a".into()],
+                qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             })
         );
@@ -614,7 +1066,7 @@ mod tests {
             find_in_scope(&scope, "b"),
             Some(&ScopeMember::Var {
                 name: "b".into(),
-                qualified_name: vec!["b".into()],
+                qualified_name: qname![std::b],
                 typ: i32_type,
             })
         );
@@ -623,18 +1075,18 @@ mod tests {
 
     #[test]
     fn test_find_in_scope_nested() {
-        let i32_type = Rc::new(Type::Named(vec!["i32".into()]));
+        let i32_type = Rc::new(Type::Named(qname![i32]));
         let scope = vec![
             ScopeMember::Var {
                 name: "a".into(),
-                qualified_name: vec!["std".into(), "a".into()],
+                qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             },
             ScopeMember::Module {
                 name: "b".into(),
                 members: vec![ScopeMember::Var {
                     name: "c".into(),
-                    qualified_name: vec!["std".into(), "b".into(), "c".into()],
+                    qualified_name: qname![std::b::c],
                     typ: i32_type.clone(),
                 }],
             },
@@ -643,7 +1095,7 @@ mod tests {
             find_in_scope_nested(&scope, &["a".into()]),
             Some(&ScopeMember::Var {
                 name: "a".into(),
-                qualified_name: vec!["std".into(), "a".into()],
+                qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             })
         );
@@ -651,7 +1103,7 @@ mod tests {
             find_in_scope_nested(&scope, &["b".into(), "c".into()]),
             Some(&ScopeMember::Var {
                 name: "c".into(),
-                qualified_name: vec!["std".into(), "b".into(), "c".into()],
+                qualified_name: qname![std::b::c],
                 typ: i32_type,
             })
         );
@@ -662,9 +1114,9 @@ mod tests {
     }
 
     fn get_lib() -> Vec<ScopeMember> {
-        let str_type = Rc::new(Type::Named(vec!["str".into()]));
-        let i32_type = Rc::new(Type::Named(vec!["i32".into()]));
-        let bool_type = Rc::new(Type::Named(vec!["bool".into()]));
+        let str_type = Rc::new(Type::Named(qname![str]));
+        let i32_type = Rc::new(Type::Named(qname![i32]));
+        let bool_type = Rc::new(Type::Named(qname![bool]));
         vec![
             ScopeMember::Module {
                 name: "std".into(),
@@ -673,12 +1125,12 @@ mod tests {
                     members: vec![
                         ScopeMember::Var {
                             name: "print".into(),
-                            qualified_name: vec!["std".into(), "io".into(), "print".into()],
+                            qualified_name: qname![std::io::print],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "read".into(),
-                            qualified_name: vec!["std".into(), "io".into(), "read".into()],
+                            qualified_name: qname![std::io::read],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
                     ],
@@ -686,27 +1138,27 @@ mod tests {
             },
             ScopeMember::TypeVar {
                 name: "i32".into(),
-                qualified_name: vec!["std".into(), "i32".into()],
+                qualified_name: qname![std::i32],
                 equal_to: i32_type,
             },
             ScopeMember::TypeVar {
                 name: "str".into(),
-                qualified_name: vec!["std".into(), "str".into()],
+                qualified_name: qname![std::str],
                 equal_to: str_type,
             },
             ScopeMember::TypeVar {
                 name: "bool".into(),
-                qualified_name: vec!["std".into(), "bool".into()],
+                qualified_name: qname![std::bool],
                 equal_to: bool_type.clone(),
             },
             ScopeMember::Var {
                 name: "true".into(),
-                qualified_name: vec!["std".into(), "bool".into(), "true".into()],
+                qualified_name: qname![std::bool::true],
                 typ: bool_type.clone(),
             },
             ScopeMember::Var {
                 name: "false".into(),
-                qualified_name: vec!["std".into(), "bool".into(), "false".into()],
+                qualified_name: qname![std::bool::false],
                 typ: bool_type,
             },
         ]
@@ -724,7 +1176,7 @@ mod tests {
             x: str = \"hello\"
         "});
 
-        let [ main ] = &program.declarations[..] else {
+        let [main] = &program.declarations[..] else {
             panic!("Expected exactly one declaration");
         };
 
@@ -743,11 +1195,16 @@ mod tests {
         assert_eq!(**return_type, "int".type_var());
         assert_eq!(*parameters, vec![]);
 
-        let Some([ statement1, statement2 ]) = body.as_deref() else {
+        let Some([statement1, statement2]) = body.as_deref() else {
             panic!("Expected exactly two statements");
         };
 
-        let c::Statement::Declaration { type_expression, initializer, .. } = statement1 else {
+        let c::Statement::Declaration {
+            type_expression,
+            initializer,
+            ..
+        } = statement1
+        else {
             panic!("Expected first statement to be a declaration");
         };
 

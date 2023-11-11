@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.0.29", features = ["derive"] }
 indoc = "2.0.1"
+nessie-lex = "0.1.0"
 

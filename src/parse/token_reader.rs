@@ -1,5 +1,5 @@
-use crate::token::{LToken, NewLine, Symbol, Quote, Token};
-use crate::range::Range;
+use crate::token::{LToken, Symbol, Token};
+use nessie_lex::{range::Range, NewLine, Quote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenReader<'source> {
@@ -152,7 +152,7 @@ impl<'source> TokenReader<'source> {
 mod tests {
     use super::*;
     use crate::lex::lex;
-    use crate::range::IntoLocated;
+    use nessie_lex::range::IntoLocated;
     use indoc::indoc;
     use std::matches;
 
