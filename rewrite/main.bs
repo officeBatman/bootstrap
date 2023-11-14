@@ -67,9 +67,9 @@ file_name = "rewrite/main.bs"
 text = std::str::strip (read file_name)
 lines = std::str::split_lines text
 
-tokens = [""]
+tokens: str[] = []
 for i in 0 .. std::arr::len lines do {
-    line = std::str::strip (std::arr::get lines i)
+    line = std::str::strip lines.[i]
     
     while gt (std::str::len line) 0 do {
         match get_first_token line with {

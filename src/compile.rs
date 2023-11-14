@@ -1,5 +1,5 @@
-use std::{mem::take, collections::HashSet};
 use std::rc::Rc;
+use std::{collections::HashSet, mem::take};
 
 use crate::{
     ast::{qname, Expr, Literal, MatchArm, Pattern, Program, QualifiedName, Statement, TypeExpr},
@@ -287,12 +287,13 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
         });
     }
 
-    let mut body = compile_block(&function.body, state)?;
-    if let Some(ret_expr) = function.return_expr {
-        let (prelude, c_expr) = check_expr(&ret_expr, &function.return_type, state)?;
-        body.extend(prelude);
-        body.push(c::Statement::Return(c_expr));
-    }
+    let (mut body, c_return_expr, ret_type) = compile_block(
+        &function.body,
+        function.return_expr.as_ref(),
+        Some(function.return_type.clone()),
+        state,
+    )?;
+    body.push(c::Statement::Return(c_return_expr));
 
     // Restore state.
     state.scope.truncate(original_scope_len);
@@ -307,7 +308,10 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
     Ok(c::TopLevelDeclaration::Function(c_function))
 }
 
-fn compile_top_level_statements(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
+fn compile_top_level_statements(
+    statements: &[Statement],
+    state: &mut State,
+) -> Result<c::Block, ()> {
     let mut ret = Ok(vec![]);
     for stmt in statements {
         // Signal to the statements that this is top level code!
@@ -321,22 +325,50 @@ fn compile_top_level_statements(statements: &[Statement], state: &mut State) -> 
     ret
 }
 
-fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
+fn compile_block(
+    statements: &[Statement],
+    return_expr: Option<&Expr>,
+    return_type: Option<Rc<Type>>,
+    state: &mut State,
+) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
     let scope_len = state.scope.len();
 
-    let mut ret = Ok(vec![]);
+    let mut prelude: Result<_, ()> = Ok(vec![]);
     for stmt in statements {
         let c_stmt = compile_statement(stmt, state);
-        ret = ret.and_then(|mut v| {
+        prelude = prelude.and_then(|mut v| {
             v.extend(c_stmt?);
             Ok(v)
         });
     }
 
+    let (expr_prelude, c_expr, expr_type) = if let Some(return_type) = return_type {
+        let (expr_prelude, c_expr) = if let Some(return_expr) = return_expr {
+            check_expr(return_expr, &return_type, state)?
+        } else {
+            // TODO: Check that return_type is unit.
+            (vec![], 1.literal())
+        };
+        (expr_prelude, c_expr, return_type)
+    } else {
+        let (expr_prelude, c_expr, expr_type) = if let Some(return_expr) = return_expr {
+            synthesize_expr(return_expr, state)?
+        } else {
+            (vec![], 1.literal(), Rc::new(Type::Unit))
+        };
+        (expr_prelude, c_expr, expr_type)
+    };
+
     // Restore the scope.
     state.scope.truncate(scope_len);
 
-    ret
+    let prelude = if let Ok(prelude) = prelude {
+        prelude.extend_pipe(expr_prelude)
+    } else {
+        expr_prelude
+    };
+
+    Ok((prelude, c_expr, expr_type))
 }
 
 fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
@@ -361,7 +393,6 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
         }
         Statement::VarDecl(name, typ, expr) => {
             // TODO: Emit a new variable to the scope even if this failed to compile
-            // TODO: If this is in the global scope, emit a global variable.
 
             let (mut c_block, c_expr, type_) = {
                 if let Some(typ) = typ {
@@ -411,12 +442,12 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 c_name: c_iter_var_name.clone(),
             };
             let body_block =
-                with_variable!(&mut state.scope, var, { compile_block(body_block, state) });
+                with_variable!(&mut state.scope, var, { compile_block(body_block, None, Some(Type::Unit.into()), state) });
 
             // Destruct the results.
             let (c_start_prelude, c_start_expr) = start_expr?;
             let (c_end_prelude, c_end_expr) = end_expr?;
-            let c_body_block = body_block?;
+            let (c_body_block, _, _) = body_block?;
 
             let c_init_var = c_start_expr.variable(c_iter_var_name.clone(), i32_c_type);
             let c_for = c::Statement::For(
@@ -442,10 +473,10 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             // Visit all the subexpressions.
             let bool_type = Rc::new(Type::Named(qname![bool]));
             let c_cond = check_expr(cond, &bool_type, state);
-            let c_body = compile_block(body, state);
+            let c_body = compile_block(body, None, Some(Type::Unit.into()), state);
             let (cond_c_prelude, cond_c_expr) = c_cond?;
 
-            Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, c_body?)))
+            Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, c_body?.0)))
         }
         Statement::If(cond, true_body, false_body) => {
             // Visit all the subexpressions.
@@ -492,12 +523,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 todo!("Error: Variable not found")
             };
 
-            let ScopeMember::Var {
-                c_name,
-                typ,
-                ..
-            } = scope_member
-            else {
+            let ScopeMember::Var { c_name, typ, .. } = scope_member else {
                 todo!("Error: Not a variable")
             };
             let typ = typ.clone();
@@ -617,12 +643,7 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
                 return state.error(Error::UnknownName(name.clone(), *range));
             };
 
-            let ScopeMember::Var {
-                typ,
-                c_name,
-                ..
-            } = member
-            else {
+            let ScopeMember::Var { typ, c_name, .. } = member else {
                 todo!()
             };
 
@@ -790,6 +811,7 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
             Ok((prelude, c_out_var_name.var(), out_type))
         }
         Expr::Block(statements, None, _) => {
+            // TODO: Use compile_block
             let original_scope_len = state.scope.len();
 
             let prelude = statements
@@ -805,6 +827,7 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
             Ok((prelude, 0.literal(), Type::Unit.into()))
         }
         Expr::Block(statements, Some(ret), _) => {
+            // TODO: Use compile_block
             let original_scope_len = state.scope.len();
 
             let compiled_statements = statements

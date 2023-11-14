@@ -13,7 +13,6 @@ use cli::{parse_args, Action, Cli};
 use error::Report;
 use std::fs;
 use std::io;
-use std::path::Path;
 use std::path::PathBuf;
 
 use crate::ast::qname;
@@ -358,7 +357,7 @@ fn initial_scope() -> Vec<ScopeMember> {
         },
         ScopeMember::Var {
             name: "not".into(),
-            c_name: "not".into(),
+            c_name: "bootstrap_not".into(),
             qualified_name: qname![bootstrap::not],
             typ: Type::Func(vec![bool_type.clone()], bool_type.clone()).into(),
         },
