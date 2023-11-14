@@ -110,7 +110,6 @@ fn sort_declarations(mut declarations: Vec<c::TopLevelDeclaration>) -> Vec<c::To
     let mut rank = 0;
 
     while !ranks[rank].is_empty() {
-        dbg!(&ranks);
         let this_rank = &ranks[rank];
         let mut next_rank = HashSet::new();
         for &decl_index in this_rank {

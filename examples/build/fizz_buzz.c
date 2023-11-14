@@ -2,9 +2,9 @@
 
 int main();
 
-int fizz_buzz_0(i32 n);
-
 i32 n_1;
+
+int fizz_buzz_0(i32 n);
 
 int main() {
     print(make_str("How much fizz buzz do you want? "));
