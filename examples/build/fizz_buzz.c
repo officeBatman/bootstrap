@@ -1,8 +1,8 @@
 #include "bootstrap.h"
 
-int main();
-
 i32 n_1;
+
+int main();
 
 int fizz_buzz_0(i32 n);
 
@@ -31,5 +31,6 @@ int fizz_buzz_0(i32 n) {
             }
         }
     }
+    return 1;
 }
 
