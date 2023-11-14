@@ -3,8 +3,8 @@ mod qualified_name;
 use crate::name::Name;
 use nessie_lex::range::Range;
 
-pub use qualified_name::QualifiedName;
 pub(crate) use qualified_name::qname;
+pub use qualified_name::QualifiedName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
@@ -15,7 +15,7 @@ pub struct Program {
 pub enum Statement {
     Import(QualifiedName, Range),
     Expr(Expr),
-    VarDecl(Name, Expr),
+    VarDecl(Name, Option<TypeExpr>, Expr),
     For(Name, Expr, Expr, Vec<Statement>),
     While(Expr, Vec<Statement>),
     If(Expr, Vec<Statement>, Option<Vec<Statement>>),
@@ -41,6 +41,7 @@ pub enum Expr {
     Match(Box<Expr>, Vec<MatchArm>, Range),
     Block(Vec<Statement>, Option<Box<Expr>>, Range),
     Plus(Box<Expr>, Box<Expr>),
+    Equals(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,10 +85,10 @@ impl Expr {
             | Expr::Literal(_, range)
             | Expr::Array(_, range)
             | Expr::Match(.., range)
-            | Expr::Block(.., range) 
+            | Expr::Block(.., range)
             | Expr::Index(.., range)
             | Expr::New(_, range) => *range,
-            Expr::Plus(a, b) => a.range() | b.range(),
+            Expr::Plus(a, b) | Expr::Equals(a, b) => a.range() | b.range(),
         }
     }
 }

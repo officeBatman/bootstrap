@@ -37,6 +37,7 @@ pub enum Include {
 pub enum TopLevelDeclaration {
     Function(Function),
     Struct(Name, Option<Vec<(PTypeExpr, Name)>>),
+    Var(PTypeExpr, Name, Option<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -194,6 +195,7 @@ impl TopLevelDeclaration {
                     ])
                 }),
             ),
+            Var(typ, name, expr) => (I::line(typ.to_code_with_name(name) + ";"), None),
         }
     }
 }

@@ -6,6 +6,10 @@ typedef struct str2 str2;
 
 int main();
 
+token make_token(str _0, str _1);
+
+str2 make_str2(str _0, str _1);
+
 bool is_letter(char ch);
 
 bool is_symbol(char ch);
@@ -15,10 +19,6 @@ bool first_char_is_letter(str string);
 bool first_char_is_symbol(str string);
 
 str2 get_first_token(str string);
-
-token make_token(str _0, str _1);
-
-str2 make_str2(str _0, str _1);
 
 struct token { str _0; str _1; };
 
@@ -69,6 +69,20 @@ int main() {
     return 0;
 }
 
+token make_token(str _0, str _1) {
+    token out;
+    out._0 = _0;
+    out._1 = _1;
+    return out;
+}
+
+str2 make_str2(str _0, str _1) {
+    str2 out;
+    out._0 = _0;
+    out._1 = _1;
+    return out;
+}
+
 bool is_letter(char ch) {
     i32 i = std_char_to_i32(ch);
     i32 a = std_char_to_i32('a');
@@ -116,19 +130,5 @@ str2 get_first_token(str string) {
         }
     }
     return make_str2(ret, string);
-}
-
-token make_token(str _0, str _1) {
-    token out;
-    out._0 = _0;
-    out._1 = _1;
-    return out;
-}
-
-str2 make_str2(str _0, str _1) {
-    str2 out;
-    out._0 = _0;
-    out._1 = _1;
-    return out;
 }
 

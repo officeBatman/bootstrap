@@ -54,6 +54,14 @@ pub trait CombExpr1: Into<Box<Expr>> {
         Expr::Binary(BinaryOp::Lt, self.into(), other.into())
     }
 
+    fn equals(self, other: impl Into<Box<Expr>>) -> Expr {
+        Expr::Binary(BinaryOp::Eq, self.into(), other.into())
+    }
+
+    fn op(self, other: impl Into<Box<Expr>>, op: BinaryOp) -> Expr {
+        Expr::Binary(op, self.into(), other.into())
+    }
+
     /// Makes a call expression to this function.
     fn call(self, parameters: impl Into<Vec<Expr>>) -> Expr {
         Expr::Call(self.into(), parameters.into())

@@ -1,2 +1,4 @@
 /target
 /delete
+/rewrite/*.c
+/rewrite/*.exe

@@ -48,6 +48,12 @@ pub enum Error {
         right: Rc<Type>,
         range: Range,
     },
+    TypeMismatch {
+        // TODO: Add context to this error (it is too generic).
+        expected: Rc<Type>,
+        got: Rc<Type>,
+        range: Range,
+    },
 }
 
 impl From<Error> for Report {
@@ -136,6 +142,15 @@ impl From<Error> for Report {
                 hint: Some(
                     format!(
                         "The left value is of type '{left}' but the right value is of type '{right}'",
+                    ),
+                ),
+            },
+            Error::TypeMismatch { expected, got, range } => Report {
+                message: "Tried to use a value of the wrong type".into(),
+                range,
+                hint: Some(
+                    format!(
+                        "Expected a value of type '{expected}' but got a value of type '{got}'",
                     ),
                 ),
             },

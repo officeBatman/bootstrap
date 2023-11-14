@@ -1,12 +1,12 @@
 mod token_reader;
 
-use crate::ast;
+use crate::ast::{self, Expr, Statement, TypeExpr};
 use crate::error::Report;
 use crate::global::ExtendPipe;
 use crate::name::Name;
+use crate::token::{Keyword, LToken, Symbol, Token};
 use nessie_lex::range::Range;
 use nessie_lex::Quote;
-use crate::token::{Keyword, LToken, Symbol, Token};
 use token_reader::TokenReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,7 +235,12 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
             return Err(());
         };
 
-        return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), rhs?));
+        return Ok(ast::Statement::VarDecl(
+            // TODO: Check that name is of length 1 (Also in the Symbol::Colon branch).
+            name.first().unwrap().clone(),
+            None,
+            rhs?,
+        ));
     }
 
     if state.pop_token_eq(Symbol::Colon) {
@@ -267,9 +272,11 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
             return Err(());
         };
 
-        todo!("type annotations in variable declarations");
-
-        return Ok(ast::Statement::VarDecl(name.first().unwrap().clone(), rhs?));
+        return Ok(Statement::VarDecl(
+            name.first().unwrap().clone(),
+            Some(type_?),
+            rhs?,
+        ));
     }
 
     if state.pop_token_eq(Symbol::ColonEqual) {
@@ -290,14 +297,25 @@ fn parse_expr(state: &mut State) -> Result<ast::Expr, ()> {
         return parse_match(state);
     }
 
-    parse_plus_expr(state)
+    parse_equal_expr(state)
+}
+
+fn parse_equal_expr(state: &mut State) -> Result<ast::Expr, ()> {
+    let mut expr = parse_plus_expr(state)?;
+
+    if state.pop_token_eq(Symbol::EqualEqual) {
+        let rhs = parse_equal_expr(state)?;
+        expr = ast::Expr::Equals(Box::new(expr), Box::new(rhs));
+    }
+
+    Ok(expr)
 }
 
 fn parse_plus_expr(state: &mut State) -> Result<ast::Expr, ()> {
     let mut expr = parse_application_expr(state)?;
 
-    while state.pop_token_eq(Symbol::Plus) {
-        let rhs = parse_application_expr(state)?;
+    if state.pop_token_eq(Symbol::Plus) {
+        let rhs = parse_plus_expr(state)?;
         expr = ast::Expr::Plus(Box::new(expr), Box::new(rhs));
     }
 
@@ -306,7 +324,9 @@ fn parse_plus_expr(state: &mut State) -> Result<ast::Expr, ()> {
 
 fn parse_application_expr(state: &mut State) -> Result<ast::Expr, ()> {
     let Some(first) = parse_atom(state)? else {
-        state.errors.push(Error::ExpectedExpression(state.curr_range()));
+        state
+            .errors
+            .push(Error::ExpectedExpression(state.curr_range()));
         return Err(());
     };
 
@@ -334,7 +354,7 @@ fn parse_atom(state: &mut State) -> Result<Option<ast::Expr>, ()> {
     let Some(mut atom) = parse_atom_before_postfix(state)? else {
         return Ok(None);
     };
-    
+
     while state.pop_token_eq(Symbol::Dot) {
         if !state.pop_token_eq(Symbol::OpenSquare) {
             return state.error(Error::IndexBracketsNotOpened(start | state.prev_range()));
@@ -465,7 +485,9 @@ fn parse_type_definition(state: &mut State) -> Result<ast::Statement, ()> {
 fn parse_import(state: &mut State) -> Result<ast::Statement, ()> {
     let name_start = state.curr_range();
     let Some(name) = parse_qualified_name(state)? else {
-        state.errors.push(Error::BadNameAfterImport(name_start | state.curr_range()));
+        state
+            .errors
+            .push(Error::BadNameAfterImport(name_start | state.curr_range()));
         return Err(());
     };
 
@@ -503,7 +525,9 @@ fn parse_for(state: &mut State) -> Result<ast::Statement, ()> {
     let body = parse_block(state);
 
     let Some(name) = name else {
-        state.errors.push(Error::NoNameAfterFor(name_start_range | name_end_range));
+        state
+            .errors
+            .push(Error::NoNameAfterFor(name_start_range | name_end_range));
         return Err(());
     };
 
@@ -561,27 +585,19 @@ fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
         ));
     }
 
-    let block = parse_block(state);
+    let Some(block) = parse_block(state).transpose() else {
+        todo!("No block after if ... do")
+    };
 
     if state.pop_token_eq(Keyword::Else) {
-        let else_block = parse_block(state);
-
-        let Some(block) = block.transpose() else {
-            todo!()
-        };
-
-        let Some(else_block) = else_block.transpose() else {
+        let Some(else_block) = parse_block(state).transpose() else {
             todo!()
         };
 
         return Ok(ast::Statement::If(condition?, block?, Some(else_block?)));
     }
 
-    let Some(block) = block? else {
-        todo!()
-    };
-
-    Ok(ast::Statement::If(condition?, block, None))
+    Ok(ast::Statement::If(condition?, block?, None))
 }
 
 fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
@@ -630,9 +646,7 @@ fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
         todo!()
     };
 
-    let Some(mut block) = block else {
-        todo!()
-    };
+    let Some(mut block) = block else { todo!() };
 
     let last_statement = block.pop();
     let (body, return_expr) = match last_statement {
@@ -851,7 +865,9 @@ fn parse_qualified_name(state: &mut State) -> Result<Option<ast::QualifiedName>,
     let mut ret = vec![Name::from_str(first)];
     while state.pop_token_eq(Symbol::ColonColon) {
         let Some(next) = state.pop_token_ident() else {
-            state.errors.push(Error::NoIdentifierAfterDoubleColon(state.curr_range()));
+            state
+                .errors
+                .push(Error::NoIdentifierAfterDoubleColon(state.curr_range()));
             return Err(());
         };
         ret.push(Name::from_str(next));

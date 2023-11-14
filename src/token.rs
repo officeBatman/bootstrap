@@ -47,6 +47,8 @@ pub enum Symbol {
     Unit,
     #[string("..")]
     DotDot,
+    #[string("==")]
+    EqualEqual,
     #[string("=")]
     Equal,
     #[string(":")]

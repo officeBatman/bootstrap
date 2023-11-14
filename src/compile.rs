@@ -1,4 +1,4 @@
-use std::mem::take;
+use std::{mem::take, collections::HashSet};
 use std::rc::Rc;
 
 use crate::{
@@ -17,25 +17,18 @@ pub use error::Error;
 pub use state::{Array, Function, NewType, ScopeMember, State};
 pub use typ::Type;
 
+// This stage of compilation is responsible for code generation and type checking.
+// Type checking is bidirectional:
+// An expression can be "checked" against a type, which means that the expression
+// is generating code inorder to return a type, or it can be "synthesized" which
+// means that the expression is generating code and also a type for it's return
+// value.
+
 pub fn compile(
     program: &Program,
     initial_scope: Vec<ScopeMember>,
 ) -> Result<c::Program, Vec<Error>> {
-    let mut state = State {
-        scope: initial_scope,
-        errors: vec![],
-        name_counter: 0,
-        array_types: [(
-            Type::Named(qname![str]).into(),
-            Array {
-                type_name: "array_str".into(),
-                make_name: "make_array_str".into(),
-            },
-        )]
-        .into(),
-        functions: vec![],
-        new_types: vec![],
-    };
+    let mut state = State::new(initial_scope);
     let array_types_originals = state
         .array_types
         .keys()
@@ -92,6 +85,11 @@ pub fn compile(
         declarations.push(function_declaration);
     }
 
+    // Declare global variables!
+    for (c_name, c_type) in take(&mut state.global_vars) {
+        declarations.push(c::TopLevelDeclaration::Var(c_type, c_name, None));
+    }
+
     if error {
         return Err(state.errors);
     }
@@ -107,29 +105,30 @@ pub fn compile(
 fn sort_declarations(mut declarations: Vec<c::TopLevelDeclaration>) -> Vec<c::TopLevelDeclaration> {
     // Rank declarations to sort them. The rank of each declaration will be
     // +1 of the maximum rank that should come before it.
-    let mut ranks: Vec<Vec<usize>> = vec![(0..declarations.len()).collect()];
+    let mut ranks: Vec<HashSet<usize>> = vec![(0..declarations.len()).collect()];
 
     let mut rank = 0;
 
     while !ranks[rank].is_empty() {
         dbg!(&ranks);
-        ranks.push(vec![]); // Create the next rank.
-        for i in 0..ranks[rank].len() {
-            let decl = &declarations[ranks[rank][i]];
-            for j in 0..ranks[rank].len() {
-                if i == j {
+        let this_rank = &ranks[rank];
+        let mut next_rank = HashSet::new();
+        for &decl_index in this_rank {
+            let decl = &declarations[decl_index];
+            for &other_index in this_rank {
+                if decl_index == other_index {
                     continue;
                 }
 
-                let other_index = ranks[rank][j];
                 let other = &declarations[other_index];
 
                 if should_declaration_come_before(other, decl) {
                     // Push other to the next rank.
-                    ranks[rank + 1].push(other_index);
+                    next_rank.insert(other_index);
                 }
             }
         }
+        ranks.push(next_rank);
         // Remove the moved items from this rank.
         let (rank_vec, next_rank_vec) = {
             let mut v = ranks.iter_mut().skip(rank).take(2).collect::<Vec<_>>();
@@ -153,10 +152,10 @@ fn should_declaration_come_before(
     first: &c::TopLevelDeclaration,
     other: &c::TopLevelDeclaration,
 ) -> bool {
-    let c::TopLevelDeclaration::Struct(name1, Some(fields1)) = first else {
+    let c::TopLevelDeclaration::Struct(_name1, Some(fields1)) = first else {
         return false;
     };
-    let c::TopLevelDeclaration::Struct(name2, Some(fields2)) = other else {
+    let c::TopLevelDeclaration::Struct(name2, Some(_fields2)) = other else {
         return false;
     };
 
@@ -230,7 +229,7 @@ fn compile_array(
         type_name.clone(),
         Some(vec![
             ("size_t".type_var().into(), "length".into()),
-            (element_c_type.ptr().into(), "data".into()),
+            (element_c_type.clone().ptr().into(), "data".into()),
         ]),
     );
 
@@ -257,7 +256,7 @@ fn compile_array(
             "ret".var().dot("data").assign(
                 "malloc"
                     .var()
-                    .call(vec!["int".type_var().sizeof().mul("length".var())]),
+                    .call(vec![element_c_type.sizeof().mul("length".var())]),
             ),
             "ret".var().ret(),
         ]),
@@ -274,7 +273,10 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
         .map(|(name, ty)| (compile_type(ty, state), compile_name(&name.clone().into())))
         .collect::<Vec<_>>();
 
+    // Store state to restore.
     let original_scope_len = state.scope.len();
+    let original_function = state.current_function.clone();
+    state.current_function = Some(function.name.clone());
 
     for (name, typ) in &function.params {
         state.scope.push(ScopeMember::Var {
@@ -286,13 +288,14 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
 
     let mut body = compile_block(&function.body, state)?;
     if let Some(ret_expr) = function.return_expr {
-        let (prelude, c_expr, typ) = compile_expr(&ret_expr, state)?;
-        // TODO: check that typ == function.return_type
+        let (prelude, c_expr) = check_expr(&ret_expr, &function.return_type, state)?;
         body.extend(prelude);
         body.push(c::Statement::Return(c_expr));
     }
 
+    // Restore state.
     state.scope.truncate(original_scope_len);
+    state.current_function = original_function;
 
     let c_function = c::Function {
         return_type: return_c_type,
@@ -318,7 +321,7 @@ fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block
 fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
     match statement {
         Statement::Import(name, range) => {
-            let Some(member) = find_in_scope_nested(&state.scope, name) else {
+            let Some(member) = state.find_in_scope_nested(name) else {
                 return state.error(Error::UnknownName(name.clone(), *range));
             };
 
@@ -327,19 +330,37 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             Ok(vec![])
         }
         Statement::Expr(expr) => {
-            let (c_block, c_expr, _) = compile_expr(expr, state)?;
+            let (c_block, c_expr, _) = synthesize_expr(expr, state)?;
             Ok(c_block.extend_pipe_one(c::Statement::Expr(c_expr)))
         }
-        Statement::VarDecl(name, expr) => {
+        Statement::VarDecl(name, typ, expr) => {
             // TODO: Emit a new variable to the scope even if this failed to compile
+            // TODO: If this is in the global scope, emit a global variable.
 
-            let (mut c_block, c_expr, type_) = compile_expr(expr, state)?;
+            let (mut c_block, c_expr, type_) = {
+                if let Some(typ) = typ {
+                    let typ = eval_type_expr(typ, state)?;
+                    let (c_block, c_expr) = check_expr(expr, &typ, state)?;
+                    (c_block, c_expr, typ)
+                } else {
+                    synthesize_expr(expr, state)?
+                }
+            };
 
             let c_type = compile_type(&type_, state);
 
             let qualified_name = QualifiedName::singleton(name.clone());
             let c_name = compile_name(&qualified_name);
-            c_block.push(c_expr.variable(c_name, c_type));
+
+            if state.current_function.is_none() {
+                // When compiling a top level variable, it should be backed
+                // by a global variable instead of a local variable.
+                state.global_vars.push((c_name.clone(), c_type));
+                c_block.push(c_name.var().assign(c_expr));
+            } else {
+                // Else! Just make a local variable.
+                c_block.push(c_expr.variable(c_name, c_type));
+            }
 
             state.scope.push(ScopeMember::Var {
                 name: name.clone(),
@@ -351,9 +372,10 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
         }
         Statement::For(iteration_var_name, start_expr, end_expr, body_block) => {
             // Compile the bounds and the body.
-            let start_expr = compile_expr(start_expr, state);
-            let end_expr = compile_expr(end_expr, state);
             let i32_type: Rc<_> = Type::Named(qname!(i32)).into();
+            let i32_c_type = compile_type(&i32_type, state);
+            let start_expr = check_expr(start_expr, &i32_type, state);
+            let end_expr = check_expr(end_expr, &i32_type, state);
             let var = ScopeMember::Var {
                 name: iteration_var_name.clone(),
                 qualified_name: iteration_var_name.clone().into(),
@@ -363,22 +385,13 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 with_variable!(&mut state.scope, var, { compile_block(body_block, state) });
 
             // Destruct the results.
-            let (c_start_prelude, c_start_expr, start_type) = start_expr?;
-            let (c_end_prelude, c_end_expr, end_type) = end_expr?;
+            let (c_start_prelude, c_start_expr) = start_expr?;
+            let (c_end_prelude, c_end_expr) = end_expr?;
             let c_body_block = body_block?;
-
-            // Compile the types of the bounds.
-            let c_start_type = compile_type(&start_type, state);
-            // let c_end_type = compile_type(&end_type);
 
             let c_iter_var_name = compile_name(&iteration_var_name.clone().into());
 
-            // TODO: Check bound types
-            if [start_type, end_type].iter().any(|t| t != &i32_type) {
-                todo!()
-            }
-
-            let c_init_var = c_start_expr.variable(c_iter_var_name.clone(), c_start_type);
+            let c_init_var = c_start_expr.variable(c_iter_var_name.clone(), i32_c_type);
             let c_for = c::Statement::For(
                 // int i = 0;
                 c::Expr::Int(0),
@@ -400,32 +413,23 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
         }
         Statement::While(cond, body) => {
             // Visit all the subexpressions.
-            let c_cond = compile_expr(cond, state);
+            let bool_type = Rc::new(Type::Named(qname![bool]));
+            let c_cond = check_expr(cond, &bool_type, state);
             let c_body = compile_block(body, state);
-            let (cond_c_prelude, cond_c_expr, cond_type) = c_cond?;
-
-            // TODO: Check that cond_type is bool.
+            let (cond_c_prelude, cond_c_expr) = c_cond?;
 
             Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, c_body?)))
         }
         Statement::If(cond, true_body, false_body) => {
             // Visit all the subexpressions.
-            let c_cond = compile_expr(cond, state);
+            let bool_type = Rc::new(Type::Named(qname![bool]));
+            let c_cond = check_expr(cond, &bool_type, state);
             let c_true_body = compile_block(true_body, state);
             let c_false_body = false_body.as_ref().map(|x| compile_block(x, state));
             // Deconstruct and fail on errors.
-            let (c_cond_prelude, c_cond_expr, c_cond_type) = c_cond?;
+            let (c_cond_prelude, c_cond_expr) = c_cond?;
             let c_true_body = c_true_body?;
             let c_false_body = c_false_body.transpose()?;
-            // TODO: Check cond type
-            let bool_type = Rc::new(Type::Named(qname![bool]));
-            if c_cond_type != bool_type {
-                dbg!(&c_cond_type);
-                state.errors.push(Error::IfConditionMustReturnBool {
-                    was: c_cond_type,
-                    range: cond.range(),
-                });
-            }
 
             Ok(c_cond_prelude.extend_pipe_one(c::Statement::If(
                 c_cond_expr,
@@ -473,16 +477,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let qualified_name = qualified_name.clone();
 
             let var_c_name = compile_name(&qualified_name);
-            let (prelude, c_expr, expr_type) = compile_expr(expr, state)?;
-
-            if expr_type != typ {
-                state.error_and_continue(Error::AssignTypeMismatch {
-                    var_name: qualified_name,
-                    expected: typ.clone(),
-                    got: expr_type,
-                    range: expr.range(),
-                });
-            }
+            let (prelude, c_expr) = check_expr(expr, &typ, state)?;
 
             let prelude = match typ.as_ref() {
                 Type::Unit => prelude.extend_pipe_one(c_expr.stmt()),
@@ -534,8 +529,58 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
     }
 }
 
+fn check_expr(expr: &Expr, typ: &Rc<Type>, state: &mut State) -> Result<(c::Block, c::Expr), ()> {
+    if let Some(result) = check_empty_array_expr(expr, typ, state) {
+        return result;
+    }
+
+    check_expr_by_synthesize(expr, typ, state)
+}
+
+fn check_empty_array_expr(
+    expr: &Expr,
+    typ: &Type,
+    state: &mut State,
+) -> Option<Result<(c::Block, c::Expr), ()>> {
+    let Expr::Array(v, _) = expr else {
+        return None;
+    };
+
+    if !v.is_empty() {
+        return None;
+    }
+
+    let Type::Array(element_type) = typ else {
+        todo!("Can't synthesize non-array type for array expression");
+    };
+
+    let array = state.get_array(element_type);
+
+    let prelude = vec![];
+    let c_expr = array.make_name.clone().var().call(vec![0.literal()]);
+    Some(Ok((prelude, c_expr)))
+}
+
+fn check_expr_by_synthesize(
+    expr: &Expr,
+    typ: &Rc<Type>,
+    state: &mut State,
+) -> Result<(c::Block, c::Expr), ()> {
+    let (c_block, c_expr, expr_type) = synthesize_expr(expr, state)?;
+
+    if expr_type != *typ {
+        state.error_and_continue(Error::TypeMismatch {
+            expected: typ.clone(),
+            got: expr_type,
+            range: expr.range(),
+        });
+    }
+
+    Ok((c_block, c_expr))
+}
+
 // TODO: Return (Result<(c::Block, c::Expr), ()>, Rc<Type, ()>)
-fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
+fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
     match expr {
         Expr::Var(name, range) => {
             let Some(member) = find_in_scope_nested(&state.scope, name) else {
@@ -559,21 +604,24 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
             Ok((vec![], e, t))
         }
         Expr::Apply { func, args } => {
-            let (mut c_block, c_func, func_type) = compile_expr(func, state)?;
-
-            let mut c_args = vec![];
-            let mut arg_types = vec![];
-            for arg in args {
-                let (c_arg_block, c_arg, arg_type) = compile_expr(arg, state)?;
-                c_block.extend(c_arg_block);
-                c_args.push(c_arg);
-                arg_types.push(arg_type);
-            }
+            let (mut c_block, c_func, func_type) = synthesize_expr(func, state)?;
 
             let Type::Func(expected_arg_types, out_type) = func_type.as_ref() else {
                 return state.error(Error::NotAFunction(func_type, func.range()));
             };
 
+            if expected_arg_types.len() != args.len() {
+                todo!("Wrong number of arguments");
+            }
+
+            let mut c_args = vec![];
+            for (arg, arg_type) in args.iter().zip(expected_arg_types.iter()) {
+                let (c_arg_block, c_arg) = check_expr(arg, arg_type, state)?;
+                c_block.extend(c_arg_block);
+                c_args.push(c_arg);
+            }
+
+            /*
             if &arg_types != expected_arg_types {
                 let range = total_range(args.iter().map(|a| a.range()), func.range());
                 state.error_and_continue(Error::WrongArguments {
@@ -582,6 +630,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                     range,
                 });
             }
+            */
 
             Ok((
                 c_block,
@@ -611,21 +660,22 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
             Ok((vec![], c::Expr::Var(make_c_name), func_type))
         }
         Expr::Array(element_exprs, _) => {
-            let mut compiled_element_exprs = element_exprs
-                .iter()
-                .map(|expr| compile_expr(expr, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter();
-
-            let Some((first_block, first_expr, first_type)) = compiled_element_exprs.next() else {
+            let Some(first_element_expr) = element_exprs.first() else {
                 todo!()
             };
+
+            let (first_block, first_expr, first_type) = synthesize_expr(first_element_expr, state)?;
+
+            let compiled_element_exprs = element_exprs[1..]
+                .iter()
+                .map(|expr| check_expr(expr, &first_type, state))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter();
 
             // Combine all the element expressions into a single block.
             let (mut c_block, c_exprs) = compiled_element_exprs.fold(
                 (first_block, vec![first_expr]),
-                |(array_block, element_exprs), (expr_block, expr, typ)| {
-                    // TODO: Check that typ is equal to first_type.
+                |(array_block, element_exprs), (expr_block, expr)| {
                     (
                         array_block.extend_pipe(expr_block),
                         element_exprs.extend_pipe_one(expr),
@@ -655,7 +705,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
             Ok((c_block, var_c_name.var(), Type::Array(first_type).into()))
         }
         Expr::Match(inp, arms, _) => {
-            let (c_inp_prelude, c_inp_expr, inp_type) = compile_expr(inp, state)?;
+            let (c_inp_prelude, c_inp_expr, inp_type) = synthesize_expr(inp, state)?;
 
             let compiled_arms = arms
                 .iter()
@@ -664,7 +714,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                     let compiled_pattern = compile_pattern(pattern, &c_inp_expr, &inp_type, state)?;
                     let variables = compiled_pattern.variables.iter().cloned();
                     with_variables!(state.scope, variables, {
-                        Ok((compiled_pattern, compile_expr(body, state)?))
+                        Ok((compiled_pattern, synthesize_expr(body, state)?))
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -704,8 +754,9 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
 
             let out_c_type = compile_type(&out_type, state);
 
-            let prelude =
-                vec![out_c_type.declare(c_out_var_name.clone(), None)].extend_pipe(match_ifs);
+            let prelude = c_inp_prelude
+                .extend_pipe_one(out_c_type.declare(c_out_var_name.clone(), None))
+                .extend_pipe(match_ifs);
 
             Ok((prelude, c_out_var_name.var(), out_type))
         }
@@ -735,7 +786,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
                 .flatten()
                 .collect::<Vec<_>>();
 
-            let (ret_prelude, ret_expr, ret_type) = compile_expr(ret, state)?;
+            let (ret_prelude, ret_expr, ret_type) = synthesize_expr(ret, state)?;
 
             let prelude = compiled_statements.extend_pipe(ret_prelude);
 
@@ -744,18 +795,13 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
             Ok((prelude, ret_expr, ret_type))
         }
         Expr::Index(array_expr, index_expr, _) => {
-            let array = compile_expr(array_expr, state);
-            let index = compile_expr(index_expr, state);
+            let i32_type = Rc::new(Type::Named(qname!(i32)));
+            let array = synthesize_expr(array_expr, state);
+            let index = check_expr(index_expr, &i32_type, state);
 
             let (array_prelude, array_c_expr, array_type) = array?;
-            let (index_prelude, index_c_expr, index_type) = index?;
+            let (index_prelude, index_c_expr) = index?;
 
-            if index_type.as_ref() != &Type::Named(qname!(i32)) {
-                return state.error(Error::IndexIsNotInt {
-                    was: index_type,
-                    range: index_expr.range(),
-                });
-            }
             let Type::Array(element_type) = array_type.as_ref() else {
                 return state.error(Error::IndexNonArrayType {
                     was: array_type,
@@ -768,6 +814,7 @@ fn compile_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr, Rc
             Ok((prelude, expr, element_type.clone()))
         }
         Expr::Plus(a_expr, b_expr) => compile_plus_expr(a_expr, b_expr, state),
+        Expr::Equals(a_expr, b_expr) => compile_equals_expr(a_expr, b_expr, state),
     }
 }
 
@@ -923,8 +970,8 @@ fn compile_plus_expr(
     b_expr: &Expr,
     state: &mut State,
 ) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
-    let a = compile_expr(a_expr, state);
-    let b = compile_expr(b_expr, state);
+    let a = synthesize_expr(a_expr, state);
+    let b = synthesize_expr(b_expr, state);
 
     let (a_prelude, a_c_expr, a_type) = a?;
     let (b_prelude, b_c_expr, b_type) = b?;
@@ -999,6 +1046,33 @@ fn compile_plus_expr(
             a_c_expr.add(b_c_expr)
         }
     };
+
+    Ok((prelude, expr, ret_type))
+}
+
+fn compile_equals_expr(
+    a_expr: &Expr,
+    b_expr: &Expr,
+    state: &mut State,
+) -> Result<(c::Block, c::Expr, Rc<Type>), ()> {
+    let (a_prelude, a_c_expr, a_type) = synthesize_expr(a_expr, state)?;
+    let b = check_expr(b_expr, &a_type, state);
+    let (b_prelude, b_c_expr) = b?;
+
+    /*
+    if a_type != b_type {
+        return state.error(Error::EqualsTypesNotEqual {
+            left: a_type,
+            right: b_type,
+            range: a_expr.range() | b_expr.range(),
+        });
+    }
+    */
+
+    let prelude = a_prelude.extend_pipe(b_prelude);
+    let ret_type = Rc::new(Type::Named(qname!(bool)));
+    // TODO: Implement full structural equality.
+    let expr = a_c_expr.equals(b_c_expr);
 
     Ok((prelude, expr, ret_type))
 }
