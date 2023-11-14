@@ -23,7 +23,7 @@ pub struct ReportDisplay<'a, 'b> {
 }
 
 fn line_number(source: &str, offset: usize) -> usize {
-    source[..offset].chars().filter(|&c| c == '\n').count()
+    source[..offset].chars().filter(|&c| c == '\n').count() + 1
 }
 
 fn line_start(source: &str, offset: usize) -> Pos {
@@ -51,10 +51,10 @@ fn lines_format(source: &str, range: Range) -> Vec<String> {
         let first_line_start = line_start(source, range.0);
         let range_with_line_bellow = range.extend_start(first_line_start.saturating_sub(2));
         let lines = lines(source, range_with_line_bellow);
-        let mut formatted_lines = lines.into_iter().enumerate().map(|(i, line)| {
+        let formatted_lines = lines.into_iter().enumerate().map(|(i, line)| {
             format!(
                 "{:width$} | {}",
-                first_line_number + i,
+                first_line_number + i - 1,
                 line,
             )
         }).collect::<Vec<_>>();

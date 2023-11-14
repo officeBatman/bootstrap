@@ -445,6 +445,10 @@ fn parse_type_expr(state: &mut State) -> Result<Option<ast::TypeExpr>, ()> {
         return Ok(Some(ret));
     }
 
+    if state.pop_token_eq(Symbol::Unit) {
+        return Ok(Some(ast::TypeExpr::Unit(state.prev_range())));
+    }
+
     Ok(None)
 }
 
@@ -580,24 +584,24 @@ fn parse_if(state: &mut State) -> Result<ast::Statement, ()> {
     }
 
     if skipped {
-        state.errors.push(Error::IfConditionDidNotEnd(
-            range_after_expr | state.curr_range(),
-        ));
+        state
+            .errors
+            .push(Error::IfConditionDidNotEnd(range_after_expr));
     }
 
-    let Some(block) = parse_block(state).transpose() else {
-        todo!("No block after if ... do")
+    let block = parse_statement(state);
+
+    let else_block = if state.pop_token_eq(Keyword::Else) {
+        Some(parse_statement(state).map(Box::new))
+    } else {
+        None
     };
 
-    if state.pop_token_eq(Keyword::Else) {
-        let Some(else_block) = parse_block(state).transpose() else {
-            todo!()
-        };
-
-        return Ok(ast::Statement::If(condition?, block?, Some(else_block?)));
-    }
-
-    Ok(ast::Statement::If(condition?, block?, None))
+    Ok(ast::Statement::If(
+        condition?,
+        block?.into(),
+        else_block.transpose()?,
+    ))
 }
 
 fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
@@ -632,14 +636,14 @@ fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
         }
     }
 
-    if !state.pop_token_eq(Symbol::Colon) {
-        todo!()
-    }
-
-    let return_type = parse_type_expr(state)?;
-
-    let Some(return_type) = return_type else {
-        todo!()
+    let empty_type_expr_range = state.prev_range() | state.curr_range();
+    let return_type = if !state.pop_token_eq(Symbol::Colon) {
+        None
+    } else {
+        parse_type_expr(state)?.or_else(|| {
+            state.error_and_continue(todo!());
+            None
+        })
     };
 
     let Ok(block) = parse_block(state) else {
@@ -660,7 +664,7 @@ fn parse_fn(state: &mut State) -> Result<ast::Statement, ()> {
         params,
         body,
         return_expr,
-        return_type,
+        return_type: return_type.unwrap_or(ast::TypeExpr::Unit(empty_type_expr_range)),
     })
 }
 
@@ -980,5 +984,9 @@ impl State<'_> {
     pub fn error<T>(&mut self, error: Error) -> Result<T, ()> {
         self.errors.push(error);
         Err(())
+    }
+
+    pub fn error_and_continue(&mut self, error: Error) {
+        self.errors.push(error);
     }
 }

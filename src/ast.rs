@@ -18,7 +18,7 @@ pub enum Statement {
     VarDecl(Name, Option<TypeExpr>, Expr),
     For(Name, Expr, Expr, Vec<Statement>),
     While(Expr, Vec<Statement>),
-    If(Expr, Vec<Statement>, Option<Vec<Statement>>),
+    If(Expr, Box<Statement>, Option<Box<Statement>>),
     Type(Name, Vec<TypeExpr>),
     Function {
         name: Name,
@@ -56,6 +56,7 @@ pub enum Literal {
 pub enum TypeExpr {
     Var(Name, Range),
     Array(Box<TypeExpr>, Range),
+    Unit(Range),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +97,7 @@ impl Expr {
 impl TypeExpr {
     pub fn range(&self) -> Range {
         match self {
-            TypeExpr::Var(_, range) | TypeExpr::Array(_, range) => *range,
+            TypeExpr::Var(_, range) | TypeExpr::Array(_, range) | TypeExpr::Unit(range) => *range,
         }
     }
 }

@@ -139,31 +139,43 @@ fn initial_scope() -> Vec<ScopeMember> {
                     members: vec![
                         ScopeMember::Var {
                             name: "print".into(),
+                            c_name: "print".into(),
                             qualified_name: qname![std::io::print],
                             typ: Type::Func(vec![str_type.clone()], unit_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "println".into(),
+                            c_name: "println".into(),
                             qualified_name: qname![std::io::println],
                             typ: Type::Func(vec![str_type.clone()], unit_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "print_i32".into(),
+                            c_name: "print_i32".into(),
                             qualified_name: qname![std::io::print_i32],
                             typ: Type::Func(vec![i32_type.clone()], unit_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "print_bool".into(),
+                            c_name: "print_bool".into(),
                             qualified_name: qname![std::io::print_bool],
                             typ: Type::Func(vec![bool_type.clone()], unit_type).into(),
                         },
                         ScopeMember::Var {
                             name: "input".into(),
+                            c_name: "input".into(),
                             qualified_name: qname![std::io::input],
                             typ: Type::Func(vec![Type::Unit.into()], str_type.clone()).into(),
                         },
                         ScopeMember::Var {
+                            name: "input_i32".into(),
+                            c_name: "input_i32".into(),
+                            qualified_name: qname![std::io::input_i32],
+                            typ: Type::Func(vec![Type::Unit.into()], i32_type.clone()).into(),
+                        },
+                        ScopeMember::Var {
                             name: "read".into(),
+                            c_name: "read".into(),
                             qualified_name: qname![std::io::read],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
@@ -174,11 +186,13 @@ fn initial_scope() -> Vec<ScopeMember> {
                     members: vec![
                         ScopeMember::Var {
                             name: "len".into(),
+                            c_name: "str_len".into(),
                             qualified_name: qname![std::str::len],
                             typ: Type::Func(vec![str_type.clone()], i32_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "get".into(),
+                            c_name: "str_get".into(),
                             qualified_name: qname![std::str::get],
                             typ: Type::Func(
                                 vec![str_type.clone(), i32_type.clone()],
@@ -188,6 +202,7 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "split".into(),
+                            c_name: "split".into(),
                             qualified_name: qname![std::str::split],
                             typ: Type::Func(
                                 vec![str_type.clone(), str_type.clone()],
@@ -197,6 +212,7 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "split_lines".into(),
+                            c_name: "split_lines".into(),
                             qualified_name: qname![std::str::split_lines],
                             typ: Type::Func(
                                 vec![str_type.clone()],
@@ -206,6 +222,7 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "eq".into(),
+                            c_name: "str_eq".into(),
                             qualified_name: qname![std::str::eq],
                             typ: Type::Func(
                                 vec![str_type.clone(), str_type.clone()],
@@ -215,11 +232,13 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "from_char".into(),
+                            c_name: "str_from_char".into(),
                             qualified_name: qname![std::str::from_char],
                             typ: Type::Func(vec![char_type.clone()], str_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "concat".into(),
+                            c_name: "concat".into(),
                             qualified_name: qname![std::str::concat],
                             typ: Type::Func(
                                 vec![str_type.clone(), str_type.clone()],
@@ -229,11 +248,13 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "strip".into(),
+                            c_name: "strip".into(),
                             qualified_name: qname![std::str::strip],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "substr".into(),
+                            c_name: "substr".into(),
                             qualified_name: qname![std::str::substr],
                             typ: Type::Func(
                                 vec![str_type.clone(), i32_type.clone(), i32_type.clone()],
@@ -247,16 +268,8 @@ fn initial_scope() -> Vec<ScopeMember> {
                     name: "arr".into(),
                     members: vec![
                         ScopeMember::Var {
-                            name: "get".into(),
-                            qualified_name: qname![std::arr::get],
-                            typ: Type::Func(
-                                vec![Type::Array(str_type.clone()).into(), i32_type.clone()],
-                                str_type.clone(),
-                            )
-                            .into(),
-                        },
-                        ScopeMember::Var {
                             name: "len".into(),
+                            c_name: "str_arr_len".into(),
                             qualified_name: qname![std::arr::len],
                             typ: Type::Func(
                                 vec![Type::Array(str_type.clone()).into()],
@@ -266,6 +279,7 @@ fn initial_scope() -> Vec<ScopeMember> {
                         },
                         ScopeMember::Var {
                             name: "append".into(),
+                            c_name: "str_arr_append".into(),
                             qualified_name: qname![std::arr::append],
                             typ: Type::Func(
                                 vec![Type::Array(str_type.clone()).into(), str_type.clone()],
@@ -280,21 +294,25 @@ fn initial_scope() -> Vec<ScopeMember> {
                     members: vec![
                         ScopeMember::Var {
                             name: "is_whitespace".into(),
+                            c_name: "is_whitespace".into(),
                             qualified_name: qname![std::char::is_whitespace],
                             typ: Type::Func(vec![char_type.clone()], bool_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "to_i32".into(),
+                            c_name: "char_to_i32".into(),
                             qualified_name: qname![std::char::to_i32],
                             typ: Type::Func(vec![char_type.clone()], i32_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "from_i32".into(),
+                            c_name: "char_from_i32".into(),
                             qualified_name: qname![std::char::from_i32],
                             typ: Type::Func(vec![i32_type.clone()], char_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "eq".into(),
+                            c_name: "char_eq".into(),
                             qualified_name: qname![std::char::eq],
                             typ: Type::Func(
                                 vec![char_type.clone(), char_type.clone()],
@@ -323,11 +341,13 @@ fn initial_scope() -> Vec<ScopeMember> {
         },
         ScopeMember::Var {
             name: "true".into(),
+            c_name: "true".into(),
             qualified_name: qname![true],
             typ: bool_type.clone(),
         },
         ScopeMember::Var {
             name: "false".into(),
+            c_name: "false".into(),
             qualified_name: qname![false],
             typ: bool_type.clone(),
         },
@@ -338,31 +358,43 @@ fn initial_scope() -> Vec<ScopeMember> {
         },
         ScopeMember::Var {
             name: "not".into(),
+            c_name: "not".into(),
             qualified_name: qname![bootstrap::not],
             typ: Type::Func(vec![bool_type.clone()], bool_type.clone()).into(),
         },
         ScopeMember::Var {
             name: "gt".into(),
+            c_name: "gt".into(),
             qualified_name: qname![gt],
             typ: Type::Func(vec![i32_type.clone(), i32_type.clone()], bool_type.clone()).into(),
         },
         ScopeMember::Var {
             name: "gte".into(),
+            c_name: "gte".into(),
             qualified_name: qname![gte],
             typ: Type::Func(vec![i32_type.clone(), i32_type.clone()], bool_type.clone()).into(),
         },
         ScopeMember::Var {
             name: "lt".into(),
+            c_name: "lt".into(),
             qualified_name: qname![lt],
             typ: Type::Func(vec![i32_type.clone(), i32_type.clone()], bool_type.clone()).into(),
         },
         ScopeMember::Var {
             name: "lte".into(),
+            c_name: "lte".into(),
             qualified_name: qname![lte],
-            typ: Type::Func(vec![i32_type.clone(), i32_type], bool_type.clone()).into(),
+            typ: Type::Func(vec![i32_type.clone(), i32_type.clone()], bool_type.clone()).into(),
+        },
+        ScopeMember::Var {
+            name: "mod".into(),
+            c_name: "mod".into(),
+            qualified_name: qname![mod],
+            typ: Type::Func(vec![i32_type.clone(), i32_type.clone()], i32_type.clone()).into(),
         },
         ScopeMember::Var {
             name: "and".into(),
+            c_name: "and".into(),
             qualified_name: qname![and],
             typ: Type::Func(
                 vec![bool_type.clone(), bool_type.clone()],
@@ -372,6 +404,7 @@ fn initial_scope() -> Vec<ScopeMember> {
         },
         ScopeMember::Var {
             name: "or".into(),
+            c_name: "or".into(),
             qualified_name: qname![or],
             typ: Type::Func(vec![bool_type.clone(), bool_type.clone()], bool_type).into(),
         },

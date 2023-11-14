@@ -1,0 +1,21 @@
+import std::io::print
+import std::io::print_i32
+
+// This is variable. It has type `i32`, which is inferred.
+x = 2
+// The type can also be specified after the name.
+my_int: i32 = 3
+my_str: str = "Hello!"
+my_chr: char = '!'
+
+// Variables can be assigned:
+x := 3
+// x := "Hi!" << This would fail because x has type i32.
+
+// And can be shadowed
+if x == 2 do {
+    x = 3
+    x = "H" // This is fine because x is a new variable.
+}
+
+print_i32 x // Prints "2" because x didn't change.

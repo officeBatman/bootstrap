@@ -1,0 +1,24 @@
+fn fizz_buzz(n: i32) {
+    import std::io::println
+    import std::io::print_i32
+
+    for i in 1 .. n + 1 do {
+        if mod i 15 == 0 do {
+            println "Fizzbuzz"
+        } else if mod i 3 == 0 do {
+            println "Fizz"
+        } else if mod i 5 == 0 do {
+            println "Buzz"
+        } else {
+            print_i32 i
+            println ""
+        }
+    }
+}
+
+import std::io::print
+import std::io::input_i32
+
+print "How much fizz buzz do you want? "
+n = input_i32()
+fizz_buzz(n)

@@ -35,7 +35,7 @@ pub fn compile(
         .cloned()
         .collect::<std::collections::HashSet<_>>();
 
-    let Ok(mut block) = compile_block(&program.statements, &mut state) else {
+    let Ok(mut block) = compile_top_level_statements(&program.statements, &mut state) else {
         return Err(state.errors);
     };
 
@@ -275,14 +275,16 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
 
     // Store state to restore.
     let original_scope_len = state.scope.len();
-    let original_function = state.current_function.clone();
-    state.current_function = Some(function.name.clone());
+    let was_top_level = state.is_top_level;
+    state.is_top_level = false;
 
     for (name, typ) in &function.params {
+        let c_name = compile_name(&name.clone().into());
         state.scope.push(ScopeMember::Var {
             qualified_name: name.clone().into(),
             name: name.clone(),
             typ: typ.clone(),
+            c_name,
         });
     }
 
@@ -295,20 +297,22 @@ fn compile_function(function: Function, state: &mut State) -> Result<c::TopLevel
 
     // Restore state.
     state.scope.truncate(original_scope_len);
-    state.current_function = original_function;
+    state.is_top_level = was_top_level;
 
     let c_function = c::Function {
         return_type: return_c_type,
-        name: compile_name(&function.name.clone().into()),
+        name: compile_name(&function.c_name.clone().into()),
         parameters,
         body: Some(body),
     };
     Ok(c::TopLevelDeclaration::Function(c_function))
 }
 
-fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
+fn compile_top_level_statements(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
     let mut ret = Ok(vec![]);
     for stmt in statements {
+        // Signal to the statements that this is top level code!
+        state.is_top_level = true;
         let c_stmt = compile_statement(stmt, state);
         ret = ret.and_then(|mut v| {
             v.extend(c_stmt?);
@@ -318,7 +322,30 @@ fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block
     ret
 }
 
+fn compile_block(statements: &[Statement], state: &mut State) -> Result<c::Block, ()> {
+    let scope_len = state.scope.len();
+
+    let mut ret = Ok(vec![]);
+    for stmt in statements {
+        let c_stmt = compile_statement(stmt, state);
+        ret = ret.and_then(|mut v| {
+            v.extend(c_stmt?);
+            Ok(v)
+        });
+    }
+
+    // Restore the scope.
+    state.scope.truncate(scope_len);
+
+    ret
+}
+
 fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Block, ()> {
+    // From now on, everything is nested in a statement so we consider it not
+    // to be top level.
+    let was_top_level = state.is_top_level;
+    state.is_top_level = false;
+
     match statement {
         Statement::Import(name, range) => {
             let Some(member) = state.find_in_scope_nested(name) else {
@@ -350,22 +377,23 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let c_type = compile_type(&type_, state);
 
             let qualified_name = QualifiedName::singleton(name.clone());
-            let c_name = compile_name(&qualified_name);
+            let c_name = compile_name(&state.generate_name(name));
 
-            if state.current_function.is_none() {
+            if was_top_level {
                 // When compiling a top level variable, it should be backed
                 // by a global variable instead of a local variable.
                 state.global_vars.push((c_name.clone(), c_type));
-                c_block.push(c_name.var().assign(c_expr));
+                c_block.push(c_name.clone().var().assign(c_expr));
             } else {
                 // Else! Just make a local variable.
-                c_block.push(c_expr.variable(c_name, c_type));
+                c_block.push(c_expr.variable(c_name.clone(), c_type));
             }
 
             state.scope.push(ScopeMember::Var {
                 name: name.clone(),
                 qualified_name,
                 typ: type_,
+                c_name,
             });
 
             Ok(c_block)
@@ -376,10 +404,12 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let i32_c_type = compile_type(&i32_type, state);
             let start_expr = check_expr(start_expr, &i32_type, state);
             let end_expr = check_expr(end_expr, &i32_type, state);
+            let c_iter_var_name = compile_name(&state.generate_name(iteration_var_name));
             let var = ScopeMember::Var {
                 name: iteration_var_name.clone(),
                 qualified_name: iteration_var_name.clone().into(),
                 typ: i32_type.clone(),
+                c_name: c_iter_var_name.clone(),
             };
             let body_block =
                 with_variable!(&mut state.scope, var, { compile_block(body_block, state) });
@@ -388,8 +418,6 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let (c_start_prelude, c_start_expr) = start_expr?;
             let (c_end_prelude, c_end_expr) = end_expr?;
             let c_body_block = body_block?;
-
-            let c_iter_var_name = compile_name(&iteration_var_name.clone().into());
 
             let c_init_var = c_start_expr.variable(c_iter_var_name.clone(), i32_c_type);
             let c_for = c::Statement::For(
@@ -424,8 +452,8 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             // Visit all the subexpressions.
             let bool_type = Rc::new(Type::Named(qname![bool]));
             let c_cond = check_expr(cond, &bool_type, state);
-            let c_true_body = compile_block(true_body, state);
-            let c_false_body = false_body.as_ref().map(|x| compile_block(x, state));
+            let c_true_body = compile_statement(true_body, state);
+            let c_false_body = false_body.as_ref().map(|x| compile_statement(x, state));
             // Deconstruct and fail on errors.
             let (c_cond_prelude, c_cond_expr) = c_cond?;
             let c_true_body = c_true_body?;
@@ -466,7 +494,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             };
 
             let ScopeMember::Var {
-                qualified_name,
+                c_name,
                 typ,
                 ..
             } = scope_member
@@ -474,14 +502,13 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 todo!("Error: Not a variable")
             };
             let typ = typ.clone();
-            let qualified_name = qualified_name.clone();
+            let c_name = c_name.clone();
 
-            let var_c_name = compile_name(&qualified_name);
             let (prelude, c_expr) = check_expr(expr, &typ, state)?;
 
             let prelude = match typ.as_ref() {
                 Type::Unit => prelude.extend_pipe_one(c_expr.stmt()),
-                _ => prelude.extend_pipe_one(var_c_name.var().assign(c_expr)),
+                _ => prelude.extend_pipe_one(c_name.var().assign(c_expr)),
             };
 
             Ok(prelude)
@@ -510,8 +537,11 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 .map(|(_, typ)| typ.clone())
                 .collect::<Vec<_>>();
 
+            let c_name = compile_name(&state.generate_name(name));
+
             state.functions.push(Function {
                 name: name.clone(),
+                c_name: c_name.clone(),
                 params,
                 return_type: return_type.clone(),
                 body: body.clone(),
@@ -520,6 +550,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
 
             state.scope.push(ScopeMember::Var {
                 name: name.clone(),
+                c_name,
                 qualified_name: name.clone().into(),
                 typ: Type::Func(param_types, return_type).into(),
             });
@@ -589,15 +620,14 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
 
             let ScopeMember::Var {
                 typ,
-                qualified_name,
+                c_name,
                 ..
             } = member
             else {
                 todo!()
             };
 
-            let c_name = compile_name(qualified_name);
-            Ok((vec![], c::Expr::Var(c_name), typ.clone()))
+            Ok((vec![], c::Expr::Var(c_name.clone()), typ.clone()))
         }
         Expr::Literal(l, _) => {
             let (e, t) = literal(l)?;
@@ -847,6 +877,7 @@ fn eval_type_expr(expr: &TypeExpr, state: &mut State) -> Result<Rc<Type>, ()> {
             let inner = eval_type_expr(inner, state)?;
             Ok(Type::Array(inner).into())
         }
+        TypeExpr::Unit(_) => Ok(Type::Unit.into()),
     }
 }
 
@@ -908,11 +939,12 @@ fn compile_pattern(
 ) -> Result<CompiledPattern, ()> {
     match pattern {
         Pattern::Var(name, _) => {
-            let c_name = compile_name(&name.clone().into());
+            let c_name = compile_name(&state.generate_name(name));
             let c_inp_type = compile_type(inp_type, state);
             Ok(CompiledPattern {
                 variables: vec![ScopeMember::Var {
                     name: name.clone(),
+                    c_name: c_name.clone(),
                     qualified_name: name.clone().into(),
                     typ: inp_type.clone(),
                 }],
@@ -1119,11 +1151,13 @@ mod tests {
         let scope = vec![
             ScopeMember::Var {
                 name: "a".into(),
+                c_name: "a".into(),
                 qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             },
             ScopeMember::Var {
                 name: "b".into(),
+                c_name: "b".into(),
                 qualified_name: qname![std::b],
                 typ: i32_type.clone(),
             },
@@ -1132,6 +1166,7 @@ mod tests {
             find_in_scope(&scope, "a"),
             Some(&ScopeMember::Var {
                 name: "a".into(),
+                c_name: "a".into(),
                 qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             })
@@ -1140,6 +1175,7 @@ mod tests {
             find_in_scope(&scope, "b"),
             Some(&ScopeMember::Var {
                 name: "b".into(),
+                c_name: "b".into(),
                 qualified_name: qname![std::b],
                 typ: i32_type,
             })
@@ -1153,6 +1189,7 @@ mod tests {
         let scope = vec![
             ScopeMember::Var {
                 name: "a".into(),
+                c_name: "a".into(),
                 qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             },
@@ -1160,6 +1197,7 @@ mod tests {
                 name: "b".into(),
                 members: vec![ScopeMember::Var {
                     name: "c".into(),
+                    c_name: "c".into(),
                     qualified_name: qname![std::b::c],
                     typ: i32_type.clone(),
                 }],
@@ -1169,6 +1207,7 @@ mod tests {
             find_in_scope_nested(&scope, &["a".into()]),
             Some(&ScopeMember::Var {
                 name: "a".into(),
+                c_name: "a".into(),
                 qualified_name: qname![std::a],
                 typ: i32_type.clone(),
             })
@@ -1177,6 +1216,7 @@ mod tests {
             find_in_scope_nested(&scope, &["b".into(), "c".into()]),
             Some(&ScopeMember::Var {
                 name: "c".into(),
+                c_name: "c".into(),
                 qualified_name: qname![std::b::c],
                 typ: i32_type,
             })
@@ -1199,11 +1239,13 @@ mod tests {
                     members: vec![
                         ScopeMember::Var {
                             name: "print".into(),
+                            c_name: "print".into(),
                             qualified_name: qname![std::io::print],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
                         ScopeMember::Var {
                             name: "read".into(),
+                            c_name: "read".into(),
                             qualified_name: qname![std::io::read],
                             typ: Type::Func(vec![str_type.clone()], str_type.clone()).into(),
                         },
@@ -1227,11 +1269,13 @@ mod tests {
             },
             ScopeMember::Var {
                 name: "true".into(),
+                c_name: "true".into(),
                 qualified_name: qname![std::bool::true],
                 typ: bool_type.clone(),
             },
             ScopeMember::Var {
                 name: "false".into(),
+                c_name: "false".into(),
                 qualified_name: qname![std::bool::false],
                 typ: bool_type,
             },

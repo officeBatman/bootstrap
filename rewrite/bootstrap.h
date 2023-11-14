@@ -36,7 +36,7 @@ static inline str make_str(const char* c_str) {
     return out;
 }
 
-static inline char std_str_get(str string, int32_t index) {
+static inline char str_get(str string, int32_t index) {
     if (index < 0 || index >= string.length) {
         // TODO: Error handling.
         return '\0';
@@ -44,11 +44,11 @@ static inline char std_str_get(str string, int32_t index) {
     return str_c_string(string)[index];
 }
 
-static inline int32_t std_str_len(str string) {
+static inline int32_t str_len(str string) {
     return string.length;
 }
 
-static inline str std_str_substr(str string, int32_t start, int32_t end) {
+static inline str substr(str string, int32_t start, int32_t end) {
     start = start < 0 ? 0 : start;
     end = end > string.length ? string.length : end < start ? start : end;
     str out = make_str_len(end - start);
@@ -57,31 +57,31 @@ static inline str std_str_substr(str string, int32_t start, int32_t end) {
     return out;
 }
 
-static inline bool std_str_eq(str a, str b) {
+static inline bool str_eq(str a, str b) {
     return a.length == b.length && memcmp(str_c_string(a), str_c_string(b), a.length) == 0;
 }
 
-static inline int std_io_print(str string) {
+static inline int print(str string) {
     printf("%s", str_c_string(string));
     return 0;
 }
 
-static inline int std_io_println(str string) {
+static inline int println(str string) {
     printf("%s\n", str_c_string(string));
     return 0;
 }
 
-static inline int std_io_print_i32(int32_t i32) {
+static inline int print_i32(int32_t i32) {
     printf("%d", i32);
     return 0;
 }
 
-static inline int std_io_print_bool(bool b) {
+static inline int print_bool(bool b) {
     printf("%s", b ? "true" : "false");
     return 0;
 }
 
-static inline str std_io_input(int) {
+static inline str input(int) {
     char buffer[1024];
     fgets(buffer, 1024, stdin);
     if (buffer[strlen(buffer) - 1] == '\n')
@@ -89,7 +89,13 @@ static inline str std_io_input(int) {
     return make_str(buffer);
 }
 
-static inline str std_io_read(str filename) {
+static inline i32 input_i32(int) {
+    int i = 0;
+    scanf("%d", &i);
+    return (i32)i;
+}
+
+static inline str read(str filename) {
     FILE* file = fopen(str_c_string(filename), "rb");
     if (file == NULL) {
         return make_str("");
@@ -123,19 +129,11 @@ static inline array_str make_array_str(int32_t len) {
     return arr;
 }
 
-static inline int32_t std_arr_len(array_str arr) {
+static inline int32_t str_arr_len(array_str arr) {
     return arr.length;
 }
 
-static inline str std_arr_get(array_str arr, int32_t i) {
-    if (i < 0 || i >= arr.length) {
-        // TODO: Error handling.
-        return make_str("");
-    }
-    return arr.data[i];
-}
-
-static inline array_str std_arr_append(array_str arr, str item) {
+static inline array_str str_arr_append(array_str arr, str item) {
     int32_t len = arr.length;
     str* data = (str*)malloc(sizeof(str) * (len + 1));
     memcpy(data, arr.data, sizeof(str) * len);
@@ -144,7 +142,7 @@ static inline array_str std_arr_append(array_str arr, str item) {
     return out;
 }
 
-static inline array_str std_str_split(str string, str sep) {
+static inline array_str split(str string, str sep) {
     array_str ret = {0, NULL};
     int32_t len = string.length;
     int32_t sep_len = sep.length;
@@ -153,8 +151,8 @@ static inline array_str std_str_split(str string, str sep) {
     size_t end = 0;
     while (start < len && end < len) {
         if (memcmp(str_c_string(string) + end, str_c_string(sep), sep_len) == 0) {
-            str item = std_str_substr(string, start, end);
-            array_str appendend = std_arr_append(ret, item);
+            str item = substr(string, start, end);
+            array_str appendend = str_arr_append(ret, item);
             free(ret.data);
             ret = appendend;
             start = end + sep_len;
@@ -164,19 +162,19 @@ static inline array_str std_str_split(str string, str sep) {
         }
     }
     if (start < len) {
-        str item = std_str_substr(string, start, len);
-        array_str appendend = std_arr_append(ret, item);
+        str item = substr(string, start, len);
+        array_str appendend = str_arr_append(ret, item);
         free(ret.data);
         ret = appendend;
     }
     return ret;
 }
 
-static inline array_str std_str_split_lines(str string) {
-    return std_str_split(string, make_str("\n"));
+static inline array_str split_lines(str string) {
+    return split(string, make_str("\n"));
 }
 
-static inline str std_str_from_char(char ch) {
+static inline str str_from_char(char ch) {
     str out = make_str_len(1);
     str_c_string(out)[0] = ch;
     return out;
@@ -186,7 +184,7 @@ static inline bool bootstrap_not(bool b) {
     return !b;
 }
 
-static inline str std_str_strip(str string) {
+static inline str strip(str string) {
     int32_t start = 0;
     int32_t end = string.length - 1;
     if (end < 0) {
@@ -198,7 +196,7 @@ static inline str std_str_strip(str string) {
     while (end > start && isspace(str_c_string(string)[end])) {
         end--;
     }
-    return std_str_substr(string, start, end + 1);
+    return substr(string, start, end + 1);
 }
 
 static inline bool gt(i32 a, i32 b) {
@@ -217,11 +215,11 @@ static inline bool lte(i32 a, i32 b) {
     return a <= b;
 }
 
-static inline bool std_char_is_whitespace(char ch) {
+static inline bool is_whitespace(char ch) {
     return isspace(ch);
 }
 
-static inline str std_str_concat(str a, str b) {
+static inline str concat(str a, str b) {
     str out = make_str_len(a.length + b.length);
     memcpy(str_c_string(out), str_c_string(a), a.length);
     // +1 to copy the null terminator
@@ -239,14 +237,18 @@ static inline bool and(bool a, bool b) {
 
 #define or(a, b) ((a) || (b))
 
-static inline i32 std_char_to_i32(char ch) {
+static inline i32 char_to_i32(char ch) {
     return ch;
 }
 
-static inline char std_char_from_i32(i32 i) {
+static inline char char_from_i32(i32 i) {
     return i;
 }
 
-static inline bool std_char_eq(char a, char b) {
+static inline bool char_eq(char a, char b) {
     return a == b;
+}
+
+static inline i32 mod(i32 a, i32 b) {
+    return a % b;
 }

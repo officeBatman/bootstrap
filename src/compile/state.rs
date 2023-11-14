@@ -18,7 +18,7 @@ pub struct State {
     pub new_types: Vec<NewType>,
     pub name_counter: usize,
     pub global_vars: Vec<(Name, Rc<c::TypeExpr>)>,
-    pub current_function: Option<Name>,
+    pub is_top_level: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,6 +30,7 @@ pub struct Array {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: Name,
+    pub c_name: Name,
     pub params: Vec<(Name, Rc<Type>)>,
     pub return_type: Rc<Type>,
     pub body: Vec<ast::Statement>,
@@ -51,6 +52,7 @@ pub enum ScopeMember {
     Var {
         name: Name,
         qualified_name: QualifiedName,
+        c_name: Name,
         typ: Rc<Type>,
     },
     TypeVar {
@@ -82,7 +84,7 @@ impl State {
             functions: vec![],
             new_types: vec![],
             global_vars: vec![],
-            current_function: None,
+            is_top_level: true,
         }
     }
     pub fn error<T>(&mut self, error: Error) -> Result<T, ()> {
