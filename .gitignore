@@ -1,3 +1,4 @@
-/target
-/delete
-/*/build/
+target/
+delete/
+build/
+
