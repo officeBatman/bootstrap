@@ -1,4 +1,3 @@
 /target
 /delete
-/rewrite/*.c
-/rewrite/*.exe
+/rewrite/build

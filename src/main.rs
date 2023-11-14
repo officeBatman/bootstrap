@@ -13,6 +13,8 @@ use cli::{parse_args, Action, Cli};
 use error::Report;
 use std::fs;
 use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::ast::qname;
 use crate::compile::ScopeMember;
@@ -35,10 +37,18 @@ fn main() -> io::Result<()> {
                 std::process::exit(1);
             });
             // Write to a file.
-            let mut c_file_path = file_path.clone();
-            let mut out_file_path = file_path;
-            c_file_path.set_extension("c");
-            out_file_path.set_extension("");
+            let header_file = file_path.clone().with_file_name("bootstrap.h");
+            let header_file_copy = nest_file_path_in_directory(header_file.clone(), "build");
+            let c_file_path =
+                nest_file_path_in_directory(file_path.clone(), "build")
+                .with_extension("c");
+            let out_file_path = nest_file_path_in_directory(file_path, "build")
+                .with_extension("");
+            if !c_file_path.parent().unwrap().exists() {
+                // Create build directory if it doesn't exist.
+                fs::create_dir_all(c_file_path.parent().unwrap())?;
+            }
+            fs::write(header_file_copy, fs::read_to_string(header_file)?)?;
             fs::write(&c_file_path, c_program.to_code())?;
             println!("Compiling generated C code...");
             // Run gcc
@@ -99,6 +109,16 @@ fn compile(source: &str) -> Result<c::Program, Vec<Report>> {
 fn get_line() -> io::Result<String> {
     let mut buffer = String::new();
     io::stdin().read_line(&mut buffer).map(|_| buffer)
+}
+
+fn nest_file_path_in_directory(mut path: PathBuf, name: &str) -> PathBuf {
+    let Some(file_name) = path.file_name().map(ToOwned::to_owned) else {
+        panic!("Expected a file path, but got {:?}", path);
+    };
+    path.pop();
+    path.push(name);
+    path.push(file_name);
+    path
 }
 
 fn initial_scope() -> Vec<ScopeMember> {
