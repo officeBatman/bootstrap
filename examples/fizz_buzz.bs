@@ -21,4 +21,4 @@ import std::io::input_i32
 
 print "How much fizz buzz do you want? "
 n = input_i32()
-fizz_buzz "n"
+fizz_buzz n
