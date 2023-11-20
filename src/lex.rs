@@ -38,7 +38,7 @@ mod tests {
         let source = indoc! {r#"
             x: prop = 5
 
-            y: type = x . "a"
+            y: struct = x . "a"
         "#};
 
         assert_eq!(
@@ -54,12 +54,12 @@ mod tests {
                 Token::NewLine(NewLine::NewLine { indent: 0 }).into_located(12..13),
                 Token::Ident("y").into_located(13..14),
                 Token::Symbol(Symbol::Colon).into_located(14..15),
-                Token::Keyword(Keyword::Type).into_located(16..20),
-                Token::Symbol(Symbol::Equal).into_located(21..22),
-                Token::Ident("x").into_located(23..24),
-                Token::Symbol(Symbol::Dot).into_located(25..26),
-                Token::String(Quote::Double, "a").into_located(27..30),
-                Token::NewLine(NewLine::EmptyLine).into_located(30..31),
+                Token::Keyword(Keyword::Struct).into_located(16..22),
+                Token::Symbol(Symbol::Equal).into_located(23..24),
+                Token::Ident("x").into_located(25..26),
+                Token::Symbol(Symbol::Dot).into_located(27..28),
+                Token::String(Quote::Double, "a").into_located(29..32),
+                Token::NewLine(NewLine::EmptyLine).into_located(32..33),
             ]
         );
     }

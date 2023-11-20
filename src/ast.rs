@@ -19,7 +19,7 @@ pub enum Statement {
     For(Name, Expr, Expr, Vec<Statement>),
     While(Expr, Vec<Statement>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
-    Type(Name, Vec<TypeExpr>),
+    Struct(Name, Vec<TypeExpr>),
     Function {
         name: Name,
         params: Vec<(Name, TypeExpr)>,
@@ -50,6 +50,7 @@ pub enum Literal {
     Char(char),
     I32(i32),
     Unit,
+    Len,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

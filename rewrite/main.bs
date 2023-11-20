@@ -4,9 +4,12 @@ import std::io::println
 import std::io::input
 import std::io::read
 
-type token = str str
+struct token i32 str
+TOKEN_IDENT = 0
+TOKEN_SYMBOL = 1
+TOKEN_KEYWORD = 2
 
-type str2 = str str
+struct lex_result token str
 
 fn is_letter(ch: char): bool {
     i = std::char::to_i32 ch
@@ -25,41 +28,45 @@ fn is_symbol(ch: char): bool {
 }
 
 fn first_char_is_letter(string: str): bool {
-    and (gt (std::str::len string) 0) (is_letter (std::str::get string 0))
+    and (gt (len string) 0) (is_letter (std::str::get string 0))
 }
 
 fn first_char_is_symbol(string: str): bool {
-    and (gt (std::str::len string) 0) (is_symbol (std::str::get string 0))
+    and (gt (len string) 0) (is_symbol (std::str::get string 0))
 }
 
-fn get_first_token(string: str): str2 {
+fn get_first_token(string: str): lex_result {
     // Get rid of spaces, and keep the length
     string := std::str::strip string
-    len = std::str::len string
-    ret = ""
+    string_len = len string
+    token_kind = 0
+    token_str = ""
 
-    if gt (std::str::len string) 0 do {
+    if gt (len string) 0 do {
         ch = std::str::get string 0
         if is_symbol ch do {
             // Parse symbol token.
+            token_kind := TOKEN_SYMBOL
             while first_char_is_symbol string do {
                 ch = std::str::get string 0
                 ch_str = std::str::from_char ch
-                ret := std::str::concat ret ch_str
-                string := std::str::substr string 1 len
+                token_str := std::str::concat token_str ch_str
+                string := std::str::substr string 1 string_len
             }
+            // TODO: Change token_kind if this is a keyword!
         } else {
             // Parse word token.
+            token_kind := TOKEN_IDENT
             while first_char_is_letter string do {
                 ch = std::str::get string 0
                 ch_str = std::str::from_char ch
-                ret := std::str::concat ret ch_str
-                string := std::str::substr string 1 len
+                token_str := std::str::concat token_str ch_str
+                string := std::str::substr string 1 string_len
             }
         }
     }
 
-    new str2 ret string
+    new lex_result (new token token_kind token_str) string
 }
 
 
@@ -67,26 +74,110 @@ file_name = "rewrite/main.bs"
 text = std::str::strip (read file_name)
 lines = std::str::split_lines text
 
-tokens: str[] = []
-for i in 0 .. std::arr::len lines do {
+tokens: token[] = []
+for i in 0 .. len lines do {
     line = std::str::strip lines.[i]
     
-    while gt (std::str::len line) 0 do {
+    while gt (len line) 0 do {
         match get_first_token line with {
-            new str2 token rest => {
+            new lex_result token rest => {
                 line := rest
-                print "next token is: "
-                println token
                 tokens := tokens + [token]
             }
         }
     }
 }
 
-j = 0
-while std::str::eq tokens.[0] "" do {
-    j := j + 1
+
+struct expr i32 str expr[]
+EXPR_LIT = 0
+EXPR_OP = 1
+struct statement i32 expr
+STMT_EXPR = 0
+STMT_PRINT = 1
+struct program statement[]
+
+fn parse_program(tokens: token[]): program {
+    e = parse_expr(tokens)
+    s = new statement STMT_PRINT e
+    new program [s]
 }
-if std::str::eq tokens.[0] "import" do {
-    println "Found import!"
+
+fn parse_expr(tokens: token[]): expr {
+    new expr EXPR_LIT "0" []
+}
+
+fn compile_program(prog: program): str[] {
+    ret = [
+        "#include <stdlib.h>",
+        "#include <bootstrap.h>",
+        "",
+        "void main() {",
+    ]
+
+    match prog with {
+        new program statements => {
+            // TODO: loop through statements
+            stmt = statements.[0]
+            ret := ret + compile_statement stmt
+        }
+    }
+
+    ret := ret + [
+        "return 0;",
+        "}",
+    ]
+
+    ret
+}
+
+fn compile_statement(stmt: statement): str[] {
+    match stmt with {
+        new statement kind e => {
+            e = compile_expr e
+            get_prelude e + [ "print(" + get_c_expr e + ")" ]
+        }
+    }
+}
+
+struct comp_result str[] str
+
+fn get_prelude(c: comp_result): str[] {
+    match c with {
+        new comp_result p s => p
+    }
+}
+
+fn get_c_expr(c: comp_result): str {
+    match c with {
+        new comp_result p s => s
+    }
+}
+
+fn compile_expr(e: expr): comp_result {
+    match e with {
+        new expr kind s subexprs => {
+            ret = new comp_result [] ""
+            if kind == EXPR_LIT do {
+                ret := new comp_result [] s
+            } else if kind == EXPR_OP do {
+                ret := compile_op_expr s subexprs.[0] subexprs.[1]
+            }
+            ret
+        }
+    }
+}
+
+fn compile_op_expr(op: str, left: expr, right: expr): comp_result {
+    left = compile_expr left
+    right = compile_expr right
+    prelude = get_prelude left + get_prelude right
+    c_expr = get_c_expr left + " " + op + " " + get_c_expr right
+    new comp_result prelude c_expr
+}
+
+prog = parse_program tokens
+c_code = compile_program prog
+for i in 0..len c_code do {
+    println c_code.[i]
 }

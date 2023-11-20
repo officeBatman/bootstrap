@@ -183,9 +183,9 @@ checksum = "09fc20d2ca12cb9f044c93e3bd6d32d523e6e2ec3db4f7b2939cd99026ecd3f0"
 
 [[package]]
 name = "nessie-lex"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb7967bd845a0640cd3294edc6d207eaba1a80935578ca78412385e31f8a7aa1"
+checksum = "55a2ad0620f4728a4943021154e3ec0f5d4418069ad2d091ce719b651802a2e8"
 dependencies = [
  "indoc",
  "nessie-lex-proc-macros",
@@ -193,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "nessie-lex-proc-macros"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0ad152632ed0b160ae5d342b3f9a17f565e73e22294b2bc520a08d8a7b2f59"
+checksum = "277ae8f9b06ae1e18e01dbdb2d34f56469477144949494205468735213fc686b"
 dependencies = [
  "proc-macro2",
  "quote",

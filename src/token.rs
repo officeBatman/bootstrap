@@ -23,14 +23,16 @@ pub enum Keyword {
     Do,
     #[string("import")]
     Import,
-    #[string("type")]
-    Type,
+    #[string("struct")]
+    Struct,
     #[string("match")]
     Match,
     #[string("new")]
     New,
     #[string("with")]
     With,
+    #[string("len")]
+    Len,
 }
 
 #[derive(Symbol, Debug, Clone, Copy, PartialEq, Eq)]

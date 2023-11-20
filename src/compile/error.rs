@@ -11,7 +11,7 @@ use super::{ScopeMember, Type};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     UnknownName(QualifiedName, Range),
-    UnknownTypeName(Name, Range),
+    UnknownTypeName(QualifiedName, Range),
     NotATypeName(ScopeMember, Range),
     NotAFunction(Rc<Type>, Range),
     WrongArguments {

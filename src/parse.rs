@@ -213,8 +213,8 @@ fn parse_statement(state: &mut State) -> Result<ast::Statement, ()> {
         return parse_while(state);
     }
 
-    if state.pop_token_eq(Keyword::Type) {
-        return parse_type_definition(state);
+    if state.pop_token_eq(Keyword::Struct) {
+        return parse_statement_definition(state);
     }
 
     if state.pop_token_eq(Keyword::If) {
@@ -452,27 +452,12 @@ fn parse_type_expr(state: &mut State) -> Result<Option<ast::TypeExpr>, ()> {
     Ok(None)
 }
 
-fn parse_type_definition(state: &mut State) -> Result<ast::Statement, ()> {
+fn parse_statement_definition(state: &mut State) -> Result<ast::Statement, ()> {
     let name = state.pop_token_ident().ok_or_else(|| {
         state
             .errors
             .push(Error::ExpectedNameAfterType(state.curr_range()));
     })?;
-
-    let start = state.curr_range();
-    let skipped = skip_until(state, Symbol::Equal);
-    if skipped {
-        state
-            .errors
-            .push(Error::TooManyTokensAfterType(state.curr_range() | start));
-    }
-
-    if !state.pop_token_eq(Symbol::Equal) {
-        state
-            .errors
-            .push(Error::NoEqualAfterTypeName(state.curr_range() | start));
-        return Err(());
-    }
 
     let mut args = Vec::new();
     loop {
@@ -483,7 +468,7 @@ fn parse_type_definition(state: &mut State) -> Result<ast::Statement, ()> {
         }
     }
 
-    Ok(ast::Statement::Type(Name::from_str(name), args))
+    Ok(ast::Statement::Struct(Name::from_str(name), args))
 }
 
 fn parse_import(state: &mut State) -> Result<ast::Statement, ()> {
@@ -705,21 +690,28 @@ fn parse_array(state: &mut State) -> Result<ast::Expr, ()> {
     let mut elements = Vec::new();
 
     loop {
+        // Allow a newline before an array element.
+        state.pop_token_newline();
+
         let element = parse_expr(state);
         elements.push(element);
 
         // After an element, there can be a comma. After the optional comma, there can be a closing
         // square bracket, or another element.
         if !state.pop_token_eq(Symbol::Comma) {
+            state.pop_token_newline();
             if state.pop_token_eq(Symbol::CloseSquare) {
                 break;
             } else {
                 skip_until_pred(state, |token| {
                     matches!(token, Token::Symbol(Symbol::Comma | Symbol::CloseSquare))
                 });
-                todo!()
+                todo!("Expected comma or close square bracket after array element");
             }
         }
+
+        state.pop_token_newline();
+
         if state.pop_token_eq(Symbol::CloseSquare) {
             break;
         }
@@ -800,6 +792,8 @@ fn parse_pattern(state: &mut State) -> Result<Option<ast::Pattern>, ()> {
         let Some(name) = state.pop_token_ident() else {
             todo!()
         };
+
+        let range = range | state.prev_range();
 
         // TODO: Use `parse_pattern_atom` instead
         let mut subpatterns = vec![];
@@ -900,6 +894,10 @@ fn parse_literal(state: &mut State) -> Result<Option<ast::Literal>, ()> {
 
     if state.pop_token_eq(Symbol::Unit) {
         return Ok(Some(ast::Literal::Unit));
+    }
+
+    if state.pop_token_eq(Keyword::Len) {
+        return Ok(Some(ast::Literal::Len));
     }
 
     Ok(None)

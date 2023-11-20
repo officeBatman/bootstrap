@@ -39,11 +39,6 @@ pub fn compile(
         return Err(state.errors);
     };
 
-    // Also fail if compilation ended but had errors.
-    if !state.errors.is_empty() {
-        return Err(state.errors);
-    }
-
     // Add a `return 0;`
     block.push(c::Statement::Return(0.literal()));
 
@@ -91,6 +86,11 @@ pub fn compile(
     }
 
     if error {
+        return Err(state.errors);
+    }
+
+    // Also fail if compilation ended but had errors.
+    if !state.errors.is_empty() {
         return Err(state.errors);
     }
 
@@ -441,8 +441,9 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 typ: i32_type.clone(),
                 c_name: c_iter_var_name.clone(),
             };
-            let body_block =
-                with_variable!(&mut state.scope, var, { compile_block(body_block, None, Some(Type::Unit.into()), state) });
+            let body_block = with_variable!(&mut state.scope, var, {
+                compile_block(body_block, None, Some(Type::Unit.into()), state)
+            });
 
             // Destruct the results.
             let (c_start_prelude, c_start_expr) = start_expr?;
@@ -475,8 +476,9 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
             let c_cond = check_expr(cond, &bool_type, state);
             let c_body = compile_block(body, None, Some(Type::Unit.into()), state);
             let (cond_c_prelude, cond_c_expr) = c_cond?;
+            let (body_c_prelude, body_c_expr, body_type) = c_body?;
 
-            Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, c_body?.0)))
+            Ok(cond_c_prelude.extend_pipe_one(c::Statement::While(cond_c_expr, body_c_prelude)))
         }
         Statement::If(cond, true_body, false_body) => {
             // Visit all the subexpressions.
@@ -495,7 +497,7 @@ fn compile_statement(statement: &Statement, state: &mut State) -> Result<c::Bloc
                 c_false_body,
             )))
         }
-        Statement::Type(name, type_exprs) => {
+        Statement::Struct(name, type_exprs) => {
             // TODO: Push the name even if there were errors.
             let member_index = state.scope.len();
             state.scope.push(ScopeMember::NewType {
@@ -650,10 +652,15 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
             Ok((vec![], c::Expr::Var(c_name.clone()), typ.clone()))
         }
         Expr::Literal(l, _) => {
-            let (e, t) = literal(l)?;
+            let (e, t) = literal(l, state)?;
             Ok((vec![], e, t))
         }
         Expr::Apply { func, args } => {
+            // Special case - `len array`
+            if let Some(x) = compile_len_application(func, args, state) {
+                return x;
+            }
+
             let (mut c_block, c_func, func_type) = synthesize_expr(func, state)?;
 
             let Type::Func(expected_arg_types, out_type) = func_type.as_ref() else {
@@ -690,7 +697,7 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
         }
         Expr::New(name, _) => {
             let Some(member) = find_in_scope_nested(&state.scope, name) else {
-                todo!()
+                return state.error(Error::UnknownTypeName(name.clone(), expr.range()));
             };
 
             let ScopeMember::NewType {
@@ -865,9 +872,56 @@ fn synthesize_expr(expr: &Expr, state: &mut State) -> Result<(c::Block, c::Expr,
             let expr = array_c_expr.dot("data").index(index_c_expr);
             Ok((prelude, expr, element_type.clone()))
         }
-        Expr::Plus(a_expr, b_expr) => compile_plus_expr(a_expr, b_expr, state),
+        Expr::Plus(a_expr, b_expr) => synthesize_plus_expr(a_expr, b_expr, state),
         Expr::Equals(a_expr, b_expr) => compile_equals_expr(a_expr, b_expr, state),
     }
+}
+
+fn compile_len_application(
+    func: &Expr,
+    args: &[Expr],
+    state: &mut State,
+) -> Option<Result<(c::Block, c::Expr, Rc<Type>), ()>> {
+    let Expr::Literal(Literal::Len, _) = func else {
+        return None;
+    };
+
+    let mut c_block = vec![];
+    let mut c_args = Ok(vec![]);
+    for arg in args {
+        let arg = synthesize_expr(arg, state);
+        match (&mut c_args, arg) {
+            (Ok(c_args), Ok((arg_prelude, arg_c_expr, arg_type))) => {
+                c_block.extend(arg_prelude);
+                c_args.push((arg_c_expr, arg_type));
+            }
+            _ => {
+                c_args = Err(());
+            }
+        }
+    }
+
+    if args.len() != 1 {
+        return Some(state.error(todo!("Wrong number of arguments")));
+    }
+
+    let Ok(mut c_args) = c_args else {
+        return Some(Err(()));
+    };
+
+    let (c_arg, c_arg_type) = c_args.pop().unwrap();
+
+    match c_arg_type.as_ref() {
+        Type::Named(name) if name == &qname!(str) => (),
+        Type::Array(_) => (),
+        _ => {
+            state.error_and_continue(todo!("len() can only be called on strings and arrays"));
+        }
+    }
+
+    let c_expr = c_arg.dot("length");
+    let out_type = Rc::new(Type::Named(qname!(i32)));
+    Some(Ok((c_block, c_expr, out_type)))
 }
 
 fn eval_type_expr(expr: &TypeExpr, state: &mut State) -> Result<Rc<Type>, ()> {
@@ -876,7 +930,7 @@ fn eval_type_expr(expr: &TypeExpr, state: &mut State) -> Result<Rc<Type>, ()> {
             let Some(member) = find_in_scope(&state.scope, name) else {
                 state
                     .errors
-                    .push(Error::UnknownTypeName(name.clone(), *range));
+                    .push(Error::UnknownTypeName(name.clone().into(), *range));
                 return Err(());
             };
 
@@ -916,7 +970,7 @@ fn compile_type(t: &Type, state: &mut State) -> Rc<c::TypeExpr> {
     }
 }
 
-fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
+fn literal(literal: &Literal, state: &mut State) -> Result<(c::Expr, Rc<Type>), ()> {
     fn typ(name: impl Into<Name>) -> Rc<Type> {
         Rc::new(Type::Named(name.into().into()))
     }
@@ -926,6 +980,7 @@ fn literal(literal: &Literal) -> Result<(c::Expr, Rc<Type>), ()> {
         Literal::I32(i) => Ok((i.literal(), typ("i32"))),
         Literal::Char(ch) => Ok((ch.literal(), typ("char"))),
         Literal::Unit => Ok((0.literal(), Type::Unit.into())),
+        Literal::Len => state.error(todo!("Cannot use a `len` literal outside on application")),
     }
 }
 
@@ -974,9 +1029,9 @@ fn compile_pattern(
                 condition: 1.literal(),
             })
         }
-        Pattern::New(qualified_name, field_patterns, _) => {
+        Pattern::New(qualified_name, field_patterns, range) => {
             let Some(member) = find_in_scope_nested(&state.scope, qualified_name.parts()) else {
-                todo!()
+                return state.error(Error::UnknownTypeName(qualified_name.clone(), *range));
             };
 
             let ScopeMember::NewType {
@@ -990,10 +1045,10 @@ fn compile_pattern(
 
             if field_patterns.len() != field_types.len() {
                 state.error_and_continue(Error::WrongAmountOfFieldsInNewPattern {
-                    new_type: todo!(),
+                    new_type: Rc::new(Type::Named(qualified_name.clone())),
                     type_has: field_patterns.len(),
                     pattern_has: field_types.len(),
-                    range: todo!(),
+                    range: *range,
                 });
             }
 
@@ -1019,7 +1074,7 @@ fn compile_pattern(
     }
 }
 
-fn compile_plus_expr(
+fn synthesize_plus_expr(
     a_expr: &Expr,
     b_expr: &Expr,
     state: &mut State,
@@ -1049,7 +1104,7 @@ fn compile_plus_expr(
         if ret_type == i32_type {
             a_c_expr.add(b_c_expr)
         } else if ret_type == str_type {
-            compile_name(&qname!(std::str::concat))
+            compile_name(&qname!(concat))
                 .var()
                 .call(vec![a_c_expr, b_c_expr])
         } else if let Type::Array(element_type) = ret_type.as_ref() {
@@ -1075,18 +1130,20 @@ fn compile_plus_expr(
                 .variable(ret_c_var.clone(), ret_c_type);
 
             // Array initialization c loop.
+            let a_len = a_c_expr.clone().dot("length");
             let declare_i = 0.literal().variable(i_c_var.clone(), i32_c_type);
             let a_index = a_c_expr.clone().dot("data").index(i_c_var.clone().var());
-            let b_index = b_c_expr.dot("data").index(i_c_var.clone().var());
+            let b_index = b_c_expr
+                .dot("data")
+                .index(i_c_var.clone().var().sub(a_len.clone()));
             let ret_index = ret_c_var
                 .clone()
                 .var()
                 .dot("data")
                 .index(i_c_var.clone().var());
-            let init_array_1 = i_c_var.clone().for_(
-                a_c_expr.clone().dot("length"),
-                vec![ret_index.clone().assign(a_index)],
-            );
+            let init_array_1 = i_c_var
+                .clone()
+                .for_(a_len.clone(), vec![ret_index.clone().assign(a_index)]);
             let init_array_2 = i_c_var
                 .clone()
                 .for_(length_c_expr, vec![ret_index.assign(b_index)]);
